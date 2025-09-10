@@ -234,6 +234,7 @@ class ImageEmbossGUI:
         self.setup_ui()
         self.setup_drag_drop()
         self.setup_loading_overlay()
+        self.setup_navigation()
         
     def setup_ui(self):
         # Main container
@@ -262,6 +263,27 @@ class ImageEmbossGUI:
         # Right panel - DXF preview
         right_frame = ttk.LabelFrame(middle_frame, text="DXF Preview")
         right_frame.pack(side='right', fill='both', expand=True, padx=(5, 0))
+        
+        # Navigation controls at the top
+        nav_frame = ttk.Frame(right_frame)
+        nav_frame.pack(fill='x', pady=(5, 0))
+        
+        # Zoom controls
+        ttk.Label(nav_frame, text="Zoom:").pack(side='left', padx=(5, 2))
+        ttk.Button(nav_frame, text="+", width=3, command=self.zoom_in).pack(side='left', padx=2)
+        ttk.Button(nav_frame, text="-", width=3, command=self.zoom_out).pack(side='left', padx=2)
+        ttk.Button(nav_frame, text="1:1", width=3, command=self.zoom_reset).pack(side='left', padx=2)
+        
+        # Separator
+        ttk.Separator(nav_frame, orient='vertical').pack(side='left', fill='y', padx=10)
+        
+        # Pan controls
+        ttk.Label(nav_frame, text="Pan:").pack(side='left', padx=(5, 2))
+        ttk.Button(nav_frame, text="↑", width=2, command=lambda: self.pan_preview(0, -1)).pack(side='left', padx=1)
+        ttk.Button(nav_frame, text="↓", width=2, command=lambda: self.pan_preview(0, 1)).pack(side='left', padx=1)
+        ttk.Button(nav_frame, text="←", width=2, command=lambda: self.pan_preview(-1, 0)).pack(side='left', padx=1)
+        ttk.Button(nav_frame, text="→", width=2, command=lambda: self.pan_preview(1, 0)).pack(side='left', padx=1)
+        ttk.Button(nav_frame, text="⌂", width=2, command=self.pan_reset).pack(side='left', padx=1)
         
         self.dxf_canvas = Canvas(right_frame, bg='white')
         self.dxf_canvas.pack(fill='both', expand=True)
@@ -350,6 +372,70 @@ class ImageEmbossGUI:
             self.update_preview()
         else:
             messagebox.showerror("Error", "Could not read image.")
+            
+    def setup_navigation(self):
+        """Setup navigation variables and bindings"""
+        # Initialize zoom and pan variables
+        self.zoom_factor = 1.0
+        self.pan_x = 0
+        self.pan_y = 0
+        
+        # Bind mouse events for zoom and pan
+        self.dxf_canvas.bind("<MouseWheel>", self.on_mousewheel)
+        self.dxf_canvas.bind("<Button-1>", self.on_canvas_click)
+        self.dxf_canvas.bind("<B1-Motion>", self.on_canvas_drag)
+        
+    def zoom_in(self):
+        """Zoom in on the preview"""
+        self.zoom_factor *= 1.2
+        self.redraw_preview()
+        
+    def zoom_out(self):
+        """Zoom out on the preview"""
+        self.zoom_factor /= 1.2
+        self.redraw_preview()
+        
+    def zoom_reset(self):
+        """Reset zoom to 1:1"""
+        self.zoom_factor = 1.0
+        self.pan_x = 0
+        self.pan_y = 0
+        self.redraw_preview()
+        
+    def pan_preview(self, dx, dy):
+        """Pan the preview"""
+        self.pan_x += dx * 20
+        self.pan_y += dy * 20
+        self.redraw_preview()
+        
+    def pan_reset(self):
+        """Reset pan position"""
+        self.pan_x = 0
+        self.pan_y = 0
+        self.redraw_preview()
+        
+    def on_mousewheel(self, event):
+        """Handle mouse wheel zoom"""
+        if event.delta > 0:
+            self.zoom_in()
+        else:
+            self.zoom_out()
+            
+    def on_canvas_click(self, event):
+        """Handle canvas click for panning"""
+        self.last_x = event.x
+        self.last_y = event.y
+        
+    def on_canvas_drag(self, event):
+        """Handle canvas drag for panning"""
+        if hasattr(self, 'last_x'):
+            dx = event.x - self.last_x
+            dy = event.y - self.last_y
+            self.pan_x += dx
+            self.pan_y += dy
+            self.last_x = event.x
+            self.last_y = event.y
+            self.redraw_preview()
             
     def setup_loading_overlay(self):
         """Setup loading overlay for processing feedback"""
@@ -664,6 +750,16 @@ class ImageEmbossGUI:
             self.dxf_canvas.delete("all")
             return
             
+        # Store contours for redrawing
+        self.preview_contours = self.current_contours
+        self.redraw_preview()
+        
+    def redraw_preview(self):
+        """Redraw the preview with current zoom and pan settings"""
+        if not hasattr(self, 'preview_contours') or not self.preview_contours or self.original_image is None:
+            self.dxf_canvas.delete("all")
+            return
+            
         # Clear canvas
         self.dxf_canvas.delete("all")
         
@@ -674,31 +770,32 @@ class ImageEmbossGUI:
         if canvas_width <= 1 or canvas_height <= 1:
             return
             
-        # Calculate scale to fit contours in canvas
+        # Calculate base scale to fit contours in canvas
         h, w = self.original_image.shape[:2]
-        scale = min(canvas_width/w, canvas_height/h, 1.0) * 0.9
+        base_scale = min(canvas_width/w, canvas_height/h, 1.0) * 0.9
         
-        # Check if we have meaningful contours (not just noise)
-        meaningful_contours = []
-        for contour in self.current_contours:
-            # Filter out very small contours (likely noise)
-            area = cv2.contourArea(contour)
-            if area > 100:  # Minimum area threshold
-                meaningful_contours.append(contour)
+        # Apply zoom factor
+        scale = base_scale * self.zoom_factor
+        
+        # Calculate center position with pan offset
+        center_x = canvas_width//2 + self.pan_x
+        center_y = canvas_height//2 + self.pan_y
         
         # Draw contours with different colors based on whether they're meaningful
-        for i, contour in enumerate(self.current_contours):
+        for i, contour in enumerate(self.preview_contours):
             points = []
             for point in contour:
-                x = float(point[0][0]) * scale + canvas_width//2 - w*scale//2
-                y = float(point[0][1]) * scale + canvas_height//2 - h*scale//2
+                x = float(point[0][0]) * scale + center_x - w*scale//2
+                y = float(point[0][1]) * scale + center_y - h*scale//2
                 points.extend([x, y])
             
             if len(points) >= 6:  # At least 3 points (x,y pairs)
                 # Use dark green for meaningful contours, red for noise/small contours
                 area = cv2.contourArea(contour)
                 color = 'dark green' if area > 100 else 'red'
-                self.dxf_canvas.create_polygon(points, outline=color, fill='', width=2)
+                # Adjust line width based on zoom
+                line_width = max(1, int(2 * self.zoom_factor))
+                self.dxf_canvas.create_polygon(points, outline=color, fill='', width=line_width)
     
     def on_param_change(self, event=None):
         # Set preset to Custom when user manually changes parameters

@@ -215,14 +215,14 @@ class ImageEmbossGUI:
         self.current_contours = []
         self.image_path = None
         
-        # Default parameters
+        # Default parameters (matching your previous application)
         self.params = {
             "bilateral_diameter": 9,
             "bilateral_sigma_color": 75,
             "bilateral_sigma_space": 75,
             "gaussian_kernel_size": 5,
-            "canny_lower_threshold": 50,
-            "canny_upper_threshold": 150,
+            "canny_lower_threshold": 30,  # Your default
+            "canny_upper_threshold": 100,  # Your default
             "edge_thickness": 2,
             "gap_threshold": 5.0,
             "largest_n": 10,
@@ -298,7 +298,7 @@ class ImageEmbossGUI:
         ttk.Label(preset_frame, text="Preset:").pack(side='left')
         self.preset_var = StringVar(value="Custom")
         self.preset_combo = ttk.Combobox(preset_frame, textvariable=self.preset_var, 
-                                       values=["Custom", "People/Portraits", "Objects/Products", "Text/Logos", "Landscapes", "High Contrast"],
+                                       values=["Custom", "Default", "High Detail", "Low Noise", "Strong Edges"],
                                        state="readonly", width=15)
         self.preset_combo.pack(side='left', padx=(5, 0))
         self.preset_combo.bind('<<ComboboxSelected>>', self.on_preset_change)
@@ -535,7 +535,7 @@ class ImageEmbossGUI:
         self.create_tooltip(bilateral_c_label, "Controls color similarity threshold for bilateral filtering. Higher values allow more color variation. Range: 10-200")
         
         self.bilateral_c_var = IntVar(value=75)
-        self.bilateral_c_scale = ttk.Scale(bilateral_c_frame, from_=10, to=200, 
+        self.bilateral_c_scale = ttk.Scale(bilateral_c_frame, from_=25, to=150, 
                                          variable=self.bilateral_c_var, orient='horizontal',
                                          command=self.on_param_change)
         self.bilateral_c_scale.pack(side='left', fill='x', expand=True, padx=(5, 0))
@@ -550,7 +550,7 @@ class ImageEmbossGUI:
         self.create_tooltip(gaussian_label, "Controls the amount of blur applied. Larger values create more smoothing. Must be odd numbers. Range: 3-15")
         
         self.gaussian_var = IntVar(value=5)
-        self.gaussian_scale = ttk.Scale(gaussian_frame, from_=3, to=15, 
+        self.gaussian_scale = ttk.Scale(gaussian_frame, from_=3, to=9, 
                                       variable=self.gaussian_var, orient='horizontal',
                                       command=self.on_param_change)
         self.gaussian_scale.pack(side='left', fill='x', expand=True, padx=(5, 0))
@@ -564,12 +564,12 @@ class ImageEmbossGUI:
         canny_l_label.pack(side='left')
         self.create_tooltip(canny_l_label, "Lower threshold for Canny edge detection. Lower values detect more edges but may include noise. Range: 10-200")
         
-        self.canny_l_var = IntVar(value=50)
-        self.canny_l_scale = ttk.Scale(canny_l_frame, from_=10, to=200, 
+        self.canny_l_var = IntVar(value=30)
+        self.canny_l_scale = ttk.Scale(canny_l_frame, from_=10, to=100, 
                                      variable=self.canny_l_var, orient='horizontal',
                                      command=self.on_param_change)
         self.canny_l_scale.pack(side='left', fill='x', expand=True, padx=(5, 0))
-        self.canny_l_label = ttk.Label(canny_l_frame, text="50")
+        self.canny_l_label = ttk.Label(canny_l_frame, text="30")
         self.canny_l_label.pack(side='right', padx=(5, 0))
         
         # Canny Upper Threshold
@@ -579,12 +579,12 @@ class ImageEmbossGUI:
         canny_u_label.pack(side='left')
         self.create_tooltip(canny_u_label, "Upper threshold for Canny edge detection. Should be 2-3x the lower threshold. Higher values detect only strong edges. Range: 50-300")
         
-        self.canny_u_var = IntVar(value=150)
-        self.canny_u_scale = ttk.Scale(canny_u_frame, from_=50, to=300, 
+        self.canny_u_var = IntVar(value=100)
+        self.canny_u_scale = ttk.Scale(canny_u_frame, from_=30, to=200, 
                                      variable=self.canny_u_var, orient='horizontal',
                                      command=self.on_param_change)
         self.canny_u_scale.pack(side='left', fill='x', expand=True, padx=(5, 0))
-        self.canny_u_label = ttk.Label(canny_u_frame, text="150")
+        self.canny_u_label = ttk.Label(canny_u_frame, text="100")
         self.canny_u_label.pack(side='right', padx=(5, 0))
         
         # Edge Thickness
@@ -808,70 +808,57 @@ class ImageEmbossGUI:
         if preset == "Custom":
             return
             
-        # Define presets - optimized for actual detection
+        # Define presets (matching your previous application)
         presets = {
-            "People/Portraits": {
+            "Default": {
                 "bilateral_diameter": 9,
                 "bilateral_sigma_color": 75,
                 "gaussian_kernel_size": 5,
-                "canny_lower_threshold": 20,
-                "canny_upper_threshold": 60,
+                "canny_lower_threshold": 30,
+                "canny_upper_threshold": 100,
                 "edge_thickness": 2.0,
+                "gap_threshold": 5.0,
+                "largest_n": 10,
+                "simplify_pct": 0.5,
+                "mm_per_px": 0.25,
+                "invert": True
+            },
+            "High Detail": {
+                "bilateral_diameter": 7,
+                "bilateral_sigma_color": 50,
+                "gaussian_kernel_size": 3,
+                "canny_lower_threshold": 20,
+                "canny_upper_threshold": 80,
+                "edge_thickness": 1.5,
                 "gap_threshold": 3.0,
-                "largest_n": 5,
+                "largest_n": 15,
                 "simplify_pct": 0.3,
                 "mm_per_px": 0.25,
                 "invert": True
             },
-            "Objects/Products": {
-                "bilateral_diameter": 7,
-                "bilateral_sigma_color": 50,
-                "gaussian_kernel_size": 3,
-                "canny_lower_threshold": 15,
-                "canny_upper_threshold": 45,
-                "edge_thickness": 1.5,
-                "gap_threshold": 2.0,
-                "largest_n": 8,
-                "simplify_pct": 0.2,
-                "mm_per_px": 0.25,
-                "invert": True
-            },
-            "Text/Logos": {
-                "bilateral_diameter": 5,
-                "bilateral_sigma_color": 30,
-                "gaussian_kernel_size": 3,
-                "canny_lower_threshold": 10,
-                "canny_upper_threshold": 30,
-                "edge_thickness": 1.0,
-                "gap_threshold": 1.0,
-                "largest_n": 4,
-                "simplify_pct": 0.1,
-                "mm_per_px": 0.25,
-                "invert": True
-            },
-            "Landscapes": {
+            "Low Noise": {
                 "bilateral_diameter": 11,
-                "bilateral_sigma_color": 80,
+                "bilateral_sigma_color": 100,
                 "gaussian_kernel_size": 7,
-                "canny_lower_threshold": 25,
-                "canny_upper_threshold": 75,
+                "canny_lower_threshold": 40,
+                "canny_upper_threshold": 120,
                 "edge_thickness": 2.5,
-                "gap_threshold": 4.0,
-                "largest_n": 10,
-                "simplify_pct": 0.4,
+                "gap_threshold": 6.0,
+                "largest_n": 8,
+                "simplify_pct": 0.6,
                 "mm_per_px": 0.25,
                 "invert": True
             },
-            "High Contrast": {
+            "Strong Edges": {
                 "bilateral_diameter": 9,
-                "bilateral_sigma_color": 60,
+                "bilateral_sigma_color": 75,
                 "gaussian_kernel_size": 5,
-                "canny_lower_threshold": 30,
-                "canny_upper_threshold": 90,
+                "canny_lower_threshold": 50,
+                "canny_upper_threshold": 150,
                 "edge_thickness": 3.0,
-                "gap_threshold": 5.0,
-                "largest_n": 3,
-                "simplify_pct": 0.6,
+                "gap_threshold": 7.0,
+                "largest_n": 5,
+                "simplify_pct": 0.8,
                 "mm_per_px": 0.25,
                 "invert": True
             }

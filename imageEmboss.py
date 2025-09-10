@@ -3,6 +3,7 @@ import sys
 import cv2
 import numpy as np
 import ezdxf
+import math
 from tkinter import Tk, filedialog, simpledialog, messagebox, ttk, Canvas, PhotoImage, DoubleVar, IntVar, BooleanVar, StringVar
 try:
     from tkinterdnd2 import DND_FILES, TkinterDnD
@@ -96,7 +97,7 @@ def ask_params():
 
 def find_edges_and_contours(img_bgr, params):
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-    
+
     # Apply bilateral filter
     bilateral = cv2.bilateralFilter(
         gray,
@@ -215,6 +216,17 @@ class ImageEmbossGUI:
         self.current_contours = []
         self.image_path = None
         
+        # Edit mode variables
+        self.edit_mode = "view"  # view, paint, eraser, shapes
+        self.drawing = False
+        self.drawing_points = []
+        self.edited_contours = []  # Store manually added contours
+        self.erased_contours = set()  # Store indices of erased contours
+        self.erased_points = set()  # Store individual erased points
+        
+        # Store previous slider values for reverting
+        self.previous_slider_values = {}
+        
         # Default parameters (matching your previous application)
         self.params = {
             "bilateral_diameter": 9,
@@ -231,6 +243,140 @@ class ImageEmbossGUI:
             "invert": True  # Default to True to focus on subject
         }
         
+        # Preset configurations with explicit numeric values
+        self.preset_configs = {
+            "Default": {
+                "bilateral_diameter": 9,
+                "bilateral_sigma_color": 75,
+                "gaussian_kernel_size": 5,
+                "canny_lower_threshold": 30,
+                "canny_upper_threshold": 100,
+                "edge_thickness": 2.0,
+                "gap_threshold": 5.0,
+                "largest_n": 10,
+                "simplify_pct": 0.5,
+                "mm_per_px": 0.25,
+                "invert": True
+            },
+            "High Detail": {
+                "bilateral_diameter": 6,
+                "bilateral_sigma_color": 60,
+                "gaussian_kernel_size": 3,
+                "canny_lower_threshold": 20,
+                "canny_upper_threshold": 60,
+                "edge_thickness": 1.5,
+                "gap_threshold": 3.0,
+                "largest_n": 15,
+                "simplify_pct": 0.3,
+                "mm_per_px": 0.25,
+                "invert": True
+            },
+            "Low Noise": {
+                "bilateral_diameter": 12,
+                "bilateral_sigma_color": 120,
+                "gaussian_kernel_size": 7,
+                "canny_lower_threshold": 50,
+                "canny_upper_threshold": 150,
+                "edge_thickness": 3.0,
+                "gap_threshold": 6.0,
+                "largest_n": 10,
+                "simplify_pct": 0.6,
+                "mm_per_px": 0.25,
+                "invert": True
+            },
+            "Strong Edges": {
+                "bilateral_diameter": 8,
+                "bilateral_sigma_color": 40,
+                "gaussian_kernel_size": 5,
+                "canny_lower_threshold": 30,
+                "canny_upper_threshold": 100,
+                "edge_thickness": 5.0,
+                "gap_threshold": 8.0,
+                "largest_n": 3,
+                "simplify_pct": 1.0,
+                "mm_per_px": 0.25,
+                "invert": True
+            },
+            "Portrait": {
+                "bilateral_diameter": 6,
+                "bilateral_sigma_color": 60,
+                "gaussian_kernel_size": 3,
+                "canny_lower_threshold": 20,
+                "canny_upper_threshold": 60,
+                "edge_thickness": 1.5,
+                "gap_threshold": 2.0,
+                "largest_n": 5,
+                "simplify_pct": 0.4,
+                "mm_per_px": 0.25,
+                "invert": False
+            },
+            "Landscape": {
+                "bilateral_diameter": 9,
+                "bilateral_sigma_color": 90,
+                "gaussian_kernel_size": 5,
+                "canny_lower_threshold": 30,
+                "canny_upper_threshold": 90,
+                "edge_thickness": 2.5,
+                "gap_threshold": 4.0,
+                "largest_n": 20,
+                "simplify_pct": 0.3,
+                "mm_per_px": 0.25,
+                "invert": True
+            },
+            "Illustration": {
+                "bilateral_diameter": 5,
+                "bilateral_sigma_color": 25,
+                "gaussian_kernel_size": 3,
+                "canny_lower_threshold": 15,
+                "canny_upper_threshold": 50,
+                "edge_thickness": 2.0,
+                "gap_threshold": 2.0,
+                "largest_n": 10,
+                "simplify_pct": 0.2,
+                "mm_per_px": 0.25,
+                "invert": False
+            },
+            "Flat (Neutral)": {
+                "bilateral_diameter": 7,
+                "bilateral_sigma_color": 75,
+                "gaussian_kernel_size": 5,
+                "canny_lower_threshold": 30,
+                "canny_upper_threshold": 100,
+                "edge_thickness": 2.0,
+                "gap_threshold": 0.0,
+                "largest_n": 15,
+                "simplify_pct": 0.0,
+                "mm_per_px": 0.25,
+                "invert": True
+            },
+            "Max Fidelity": {
+                "bilateral_diameter": 6,
+                "bilateral_sigma_color": 50,
+                "gaussian_kernel_size": 3,
+                "canny_lower_threshold": 20,
+                "canny_upper_threshold": 70,
+                "edge_thickness": 1.2,
+                "gap_threshold": 4.0,
+                "largest_n": 20,
+                "simplify_pct": 0.2,
+                "mm_per_px": 0.10,
+                "invert": True
+            }
+        }
+        
+        # Preset tooltips
+        self.preset_tooltips = {
+            "Default": "Balanced for general use",
+            "High Detail": "Great for photos with fine textures",
+            "Low Noise": "Reduces grain for high-ISO images",
+            "Strong Edges": "Best for logos and bold artwork",
+            "Portrait": "Flattering for faces and skin tones",
+            "Landscape": "Crisp and vibrant for scenery",
+            "Illustration": "Clean output for digital art",
+            "Flat (Neutral)": "Minimal processing, good for editing later",
+            "Max Fidelity": "Highest quality, slowest processing"
+        }
+        
         self.setup_ui()
         self.setup_drag_drop()
         self.setup_loading_overlay()
@@ -241,13 +387,37 @@ class ImageEmbossGUI:
         main_frame = ttk.Frame(self.root)
         main_frame.pack(fill='both', expand=True, padx=10, pady=10)
         
-        # Top frame for file selection
+        # Top frame for file selection and export
         top_frame = ttk.Frame(main_frame)
         top_frame.pack(fill='x', pady=(0, 10))
         
+        # Left side - file selection
         ttk.Button(top_frame, text="Select Image", command=self.load_image).pack(side='left')
         self.status_label = ttk.Label(top_frame, text="No image loaded")
         self.status_label.pack(side='left', padx=(10, 0))
+        
+        # Right side - scaling and export
+        right_controls_frame = ttk.Frame(top_frame)
+        right_controls_frame.pack(side='right')
+        
+        # Image dimensions display
+        self.dimensions_label = ttk.Label(right_controls_frame, text="")
+        self.dimensions_label.pack(side='left', padx=(0, 10))
+        
+        # Scale input
+        ttk.Label(right_controls_frame, text="Scale:").pack(side='left')
+        self.export_scale_var = DoubleVar(value=1.0)
+        self.export_scale_entry = ttk.Entry(right_controls_frame, textvariable=self.export_scale_var, width=8)
+        self.export_scale_entry.pack(side='left', padx=(5, 5))
+        self.export_scale_entry.bind('<KeyRelease>', self.on_export_scale_change)
+        self.export_scale_entry.bind('<FocusOut>', self.on_export_scale_change)
+        
+        # Output size display
+        self.output_size_label = ttk.Label(right_controls_frame, text="")
+        self.output_size_label.pack(side='left', padx=(0, 10))
+        
+        # Export button
+        ttk.Button(right_controls_frame, text="Export DXF", command=self.export_dxf).pack(side='left')
         
         # Middle frame for image previews
         middle_frame = ttk.Frame(main_frame)
@@ -285,6 +455,24 @@ class ImageEmbossGUI:
         ttk.Button(nav_frame, text="→", width=2, command=lambda: self.pan_preview(1, 0)).pack(side='left', padx=1)
         ttk.Button(nav_frame, text="⌂", width=2, command=self.pan_reset).pack(side='left', padx=1)
         
+        # Separator
+        ttk.Separator(nav_frame, orient='vertical').pack(side='left', fill='y', padx=10)
+        
+        # Edit controls
+        ttk.Label(nav_frame, text="Edit:").pack(side='left', padx=(5, 2))
+        self.edit_mode_var = StringVar(value="view")
+        ttk.Button(nav_frame, text="✏️", width=3, command=lambda: self.set_edit_mode("paint")).pack(side='left', padx=1)
+        ttk.Button(nav_frame, text="🧽", width=3, command=lambda: self.set_edit_mode("eraser")).pack(side='left', padx=1)
+        ttk.Button(nav_frame, text="📐", width=3, command=lambda: self.set_edit_mode("shapes")).pack(side='left', padx=1)
+        ttk.Button(nav_frame, text="👁️", width=3, command=lambda: self.set_edit_mode("view")).pack(side='left', padx=1)
+        
+        # Shape selection
+        self.shape_type_var = StringVar(value="rectangle")
+        shape_combo = ttk.Combobox(nav_frame, textvariable=self.shape_type_var,
+                                 values=["rectangle", "triangle", "circle"], 
+                                 state="readonly", width=8)
+        shape_combo.pack(side='left', padx=(5, 0))
+        
         self.dxf_canvas = Canvas(right_frame, bg='white')
         self.dxf_canvas.pack(fill='both', expand=True)
         
@@ -292,25 +480,23 @@ class ImageEmbossGUI:
         bottom_frame = ttk.LabelFrame(main_frame, text="Parameters")
         bottom_frame.pack(fill='x', pady=(10, 0))
         
-        # Preset dropdown
+        # Master Preset dropdown
         preset_frame = ttk.Frame(bottom_frame)
         preset_frame.pack(fill='x', pady=(0, 10))
-        ttk.Label(preset_frame, text="Preset:").pack(side='left')
-        self.preset_var = StringVar(value="Custom")
+        ttk.Label(preset_frame, text="Master Preset:").pack(side='left')
+        self.preset_var = StringVar(value="Default")
         self.preset_combo = ttk.Combobox(preset_frame, textvariable=self.preset_var, 
-                                       values=["Custom", "Default", "High Detail", "Low Noise", "Strong Edges"],
+                                       values=["Custom", "Default", "High Detail", "Low Noise", "Strong Edges", 
+                                              "Portrait", "Landscape", "Illustration", "Flat (Neutral)", "Max Fidelity"],
                                        state="readonly", width=15)
         self.preset_combo.pack(side='left', padx=(5, 0))
-        self.preset_combo.bind('<<ComboboxSelected>>', self.on_preset_change)
+        self.preset_combo.bind('<<ComboboxSelected>>', lambda e: (
+            self.create_tooltip(self.preset_combo, self.preset_tooltips.get(self.preset_var.get(), "Master preset that coordinates all individual slider presets")),
+            self.on_preset_change()
+        ))
         
         # Create sliders
         self.create_sliders(bottom_frame)
-        
-        # Export button
-        export_frame = ttk.Frame(main_frame)
-        export_frame.pack(fill='x', pady=(10, 0))
-        
-        ttk.Button(export_frame, text="Export DXF", command=self.export_dxf).pack(side='right')
         
     def setup_drag_drop(self):
         """Setup drag and drop functionality"""
@@ -345,7 +531,7 @@ class ImageEmbossGUI:
         """Handle dropped files"""
         if not DRAG_DROP_AVAILABLE:
             return
-            
+
         # Get the dropped file path
         files = self.root.tk.splitlist(event.data)
         if files:
@@ -367,7 +553,21 @@ class ImageEmbossGUI:
         self.image_path = path
         self.original_image = cv2.imread(path, cv2.IMREAD_COLOR)
         if self.original_image is not None:
+            # Reset edit state for new image
+            self.edited_contours = []
+            self.erased_contours = set()
+            self.erased_points = set()
+            self.edit_mode = "view"
+            self.dxf_canvas.config(cursor="")
+            
+            # Update status and dimensions
+            h, w = self.original_image.shape[:2]
             self.status_label.config(text=f"Loaded: {os.path.basename(path)}")
+            self.dimensions_label.config(text=f"Size: {w}×{h}px")
+            
+            # Update output size display
+            self.on_export_scale_change()
+            
             self.display_original_image()
             self.update_preview()
         else:
@@ -380,10 +580,11 @@ class ImageEmbossGUI:
         self.pan_x = 0
         self.pan_y = 0
         
-        # Bind mouse events for zoom and pan
+        # Bind mouse events for zoom, pan, and editing
         self.dxf_canvas.bind("<MouseWheel>", self.on_mousewheel)
         self.dxf_canvas.bind("<Button-1>", self.on_canvas_click)
         self.dxf_canvas.bind("<B1-Motion>", self.on_canvas_drag)
+        self.dxf_canvas.bind("<ButtonRelease-1>", self.on_canvas_release)
         
     def zoom_in(self):
         """Zoom in on the preview"""
@@ -422,20 +623,275 @@ class ImageEmbossGUI:
             self.zoom_out()
             
     def on_canvas_click(self, event):
-        """Handle canvas click for panning"""
-        self.last_x = event.x
-        self.last_y = event.y
-        
-    def on_canvas_drag(self, event):
-        """Handle canvas drag for panning"""
-        if hasattr(self, 'last_x'):
-            dx = event.x - self.last_x
-            dy = event.y - self.last_y
-            self.pan_x += dx
-            self.pan_y += dy
+        """Handle canvas click for panning or starting drawing"""
+        if self.edit_mode == "view":
             self.last_x = event.x
             self.last_y = event.y
+        elif self.edit_mode == "paint":
+            self.drawing = True
+            self.drawing_points = [(event.x, event.y)]
+        elif self.edit_mode == "shapes":
+            self.start_shape_drawing(event.x, event.y)
+        
+    def on_canvas_drag(self, event):
+        """Handle canvas drag for panning or drawing"""
+        if self.edit_mode == "view":
+            # Pan mode
+            if hasattr(self, 'last_x'):
+                dx = event.x - self.last_x
+                dy = event.y - self.last_y
+                self.pan_x += dx
+                self.pan_y += dy
+                self.last_x = event.x
+                self.last_y = event.y
+                self.redraw_preview()
+        elif self.edit_mode == "paint":
+            # Paint mode - draw freehand
+            if self.drawing:
+                self.drawing_points.append((event.x, event.y))
+                self.draw_temporary_line()
+        elif self.edit_mode == "eraser":
+            # Eraser mode - erase along the drag path
+            self.erase_along_path(event.x, event.y)
+            
+    def on_canvas_release(self, event):
+        """Handle canvas release for finishing drawing"""
+        if self.edit_mode == "paint" and self.drawing:
+            self.finish_paint_stroke()
+        elif self.edit_mode == "shapes":
+            self.finish_shape_drawing(event.x, event.y)
+            
+    def set_edit_mode(self, mode):
+        """Set the current edit mode"""
+        self.edit_mode = mode
+        self.drawing = False
+        self.drawing_points = []
+        
+        # Update cursor based on mode
+        if mode == "view":
+            self.dxf_canvas.config(cursor="")
+        elif mode == "paint":
+            self.dxf_canvas.config(cursor="pencil")
+        elif mode == "eraser":
+            # Create a custom eraser cursor (gray circle)
+            self.dxf_canvas.config(cursor="")
+            self.setup_eraser_cursor()
+        elif mode == "shapes":
+            self.dxf_canvas.config(cursor="crosshair")
+            
+    def setup_eraser_cursor(self):
+        """Setup eraser cursor with gray circle"""
+        self.eraser_radius = 15  # Eraser radius in pixels
+        self.eraser_circle = None
+        
+        # Bind mouse motion to show eraser circle
+        self.dxf_canvas.bind("<Motion>", self.on_eraser_motion)
+        self.dxf_canvas.bind("<Leave>", self.hide_eraser_circle)
+        
+    def on_eraser_motion(self, event):
+        """Show eraser circle at cursor position"""
+        if self.edit_mode == "eraser":
+            # Remove previous eraser circle
+            if self.eraser_circle:
+                self.dxf_canvas.delete(self.eraser_circle)
+            
+            # Draw new eraser circle
+            x, y = event.x, event.y
+            self.eraser_circle = self.dxf_canvas.create_oval(
+                x - self.eraser_radius, y - self.eraser_radius,
+                x + self.eraser_radius, y + self.eraser_radius,
+                outline="gray", width=2, fill="", tags="eraser_cursor"
+            )
+            
+    def hide_eraser_circle(self, event):
+        """Hide eraser circle when mouse leaves canvas"""
+        if self.eraser_circle:
+            self.dxf_canvas.delete(self.eraser_circle)
+            self.eraser_circle = None
+            
+    def draw_temporary_line(self):
+        """Draw temporary line while painting"""
+        if len(self.drawing_points) >= 2:
+            # Clear previous temporary line
+            self.dxf_canvas.delete("temp_line")
+            # Draw new temporary line
+            points = []
+            for x, y in self.drawing_points:
+                points.extend([x, y])
+            self.dxf_canvas.create_line(points, fill="blue", width=2, tags="temp_line")
+            
+    def finish_paint_stroke(self):
+        """Finish a paint stroke and add it to contours"""
+        if len(self.drawing_points) >= 2:
+            # Convert canvas coordinates to image coordinates
+            image_points = []
+            canvas_width = self.dxf_canvas.winfo_width()
+            canvas_height = self.dxf_canvas.winfo_height()
+            h, w = self.original_image.shape[:2]
+            base_scale = min(canvas_width/w, canvas_height/h, 1.0) * 0.9
+            scale = base_scale * self.zoom_factor
+            center_x = canvas_width//2 + self.pan_x
+            center_y = canvas_height//2 + self.pan_y
+            
+            for x, y in self.drawing_points:
+                # Convert back to image coordinates
+                img_x = (x - center_x + w*scale//2) / scale
+                img_y = (y - center_y + h*scale//2) / scale
+                image_points.append([[int(img_x), int(img_y)]])
+            
+            # Add as new contour
+            if len(image_points) >= 2:
+                new_contour = np.array(image_points, dtype=np.int32)
+                self.edited_contours.append(new_contour)
+                self.redraw_preview()
+        
+        self.drawing = False
+        self.drawing_points = []
+        self.dxf_canvas.delete("temp_line")
+        
+    def erase_along_path(self, x, y):
+        """Erase along the drag path by modifying contours"""
+        if not hasattr(self, 'last_erase_x'):
+            self.last_erase_x = x
+            self.last_erase_y = y
+            return
+            
+        # Create a mask for the eraser path
+        canvas_width = self.dxf_canvas.winfo_width()
+        canvas_height = self.dxf_canvas.winfo_height()
+        h, w = self.original_image.shape[:2]
+        base_scale = min(canvas_width/w, canvas_height/h, 1.0) * 0.9
+        scale = base_scale * self.zoom_factor
+        center_x = canvas_width//2 + self.pan_x
+        center_y = canvas_height//2 + self.pan_y
+        
+        # Convert canvas coordinates to image coordinates
+        img_x1 = (self.last_erase_x - center_x + w*scale//2) / scale
+        img_y1 = (self.last_erase_y - center_y + h*scale//2) / scale
+        img_x2 = (x - center_x + w*scale//2) / scale
+        img_y2 = (y - center_y + h*scale//2) / scale
+        
+        # Erase radius in image coordinates
+        erase_radius_img = self.eraser_radius / scale
+        
+        # Mark points within eraser radius as erased
+        for i, contour in enumerate(self.preview_contours):
+            if i in self.erased_contours:
+                continue
+                
+            # Check each point in the contour
+            for j, point in enumerate(contour):
+                px, py = float(point[0][0]), float(point[0][1])
+                
+                # Check if point is within eraser radius of the line segment
+                distance = self.point_to_line_distance(px, py, img_x1, img_y1, img_x2, img_y2)
+                if distance < erase_radius_img:
+                    # Mark this point as erased by adding to a set of erased points
+                    if not hasattr(self, 'erased_points'):
+                        self.erased_points = set()
+                    self.erased_points.add((i, j))
+        
+        self.last_erase_x = x
+        self.last_erase_y = y
+        self.redraw_preview()
+        
+    def point_to_line_distance(self, px, py, x1, y1, x2, y2):
+        """Calculate distance from point to line segment"""
+        # Vector from line start to end
+        line_dx = x2 - x1
+        line_dy = y2 - y1
+        line_length_sq = line_dx * line_dx + line_dy * line_dy
+        
+        if line_length_sq == 0:
+            # Line is a point
+            return ((px - x1) ** 2 + (py - y1) ** 2) ** 0.5
+        
+        # Vector from line start to point
+        point_dx = px - x1
+        point_dy = py - y1
+        
+        # Project point onto line
+        t = max(0, min(1, (point_dx * line_dx + point_dy * line_dy) / line_length_sq))
+        
+        # Closest point on line segment
+        closest_x = x1 + t * line_dx
+        closest_y = y1 + t * line_dy
+        
+        # Distance from point to closest point on line
+        return ((px - closest_x) ** 2 + (py - closest_y) ** 2) ** 0.5
+                    
+    def start_shape_drawing(self, x, y):
+        """Start drawing a shape"""
+        self.shape_start_x = x
+        self.shape_start_y = y
+        self.drawing = True
+        
+    def finish_shape_drawing(self, x, y):
+        """Finish drawing a shape"""
+        if not self.drawing:
+            return
+            
+        shape_type = self.shape_type_var.get()
+        
+        if shape_type == "rectangle":
+            shape_points = [
+                [[self.shape_start_x, self.shape_start_y]],
+                [[x, self.shape_start_y]],
+                [[x, y]],
+                [[self.shape_start_x, y]]
+            ]
+        elif shape_type == "triangle":
+            # Equilateral triangle
+            mid_x = (self.shape_start_x + x) / 2
+            height = abs(y - self.shape_start_y)
+            if y < self.shape_start_y:  # Triangle pointing up
+                shape_points = [
+                    [[self.shape_start_x, y]],  # Bottom left
+                    [[x, y]],                   # Bottom right
+                    [[mid_x, self.shape_start_y]]  # Top center
+                ]
+            else:  # Triangle pointing down
+                shape_points = [
+                    [[self.shape_start_x, self.shape_start_y]],  # Top left
+                    [[x, self.shape_start_y]],                   # Top right
+                    [[mid_x, y]]                                 # Bottom center
+                ]
+        elif shape_type == "circle":
+            # Create circle points
+            center_x = (self.shape_start_x + x) / 2
+            center_y = (self.shape_start_y + y) / 2
+            radius = max(abs(x - self.shape_start_x), abs(y - self.shape_start_y)) / 2
+            
+            # Generate circle points
+            num_points = 16
+            shape_points = []
+            for i in range(num_points):
+                angle = 2 * math.pi * i / num_points
+                px = center_x + radius * math.cos(angle)
+                py = center_y + radius * math.sin(angle)
+                shape_points.append([[px, py]])
+        
+        # Convert to image coordinates and add as contour
+        image_points = []
+        canvas_width = self.dxf_canvas.winfo_width()
+        canvas_height = self.dxf_canvas.winfo_height()
+        h, w = self.original_image.shape[:2]
+        base_scale = min(canvas_width/w, canvas_height/h, 1.0) * 0.9
+        scale = base_scale * self.zoom_factor
+        center_x = canvas_width//2 + self.pan_x
+        center_y = canvas_height//2 + self.pan_y
+        
+        for point in shape_points:
+            img_x = (point[0][0] - center_x + w*scale//2) / scale
+            img_y = (point[0][1] - center_y + h*scale//2) / scale
+            image_points.append([[int(img_x), int(img_y)]])
+        
+        if len(image_points) >= 3:
+            new_contour = np.array(image_points, dtype=np.int32)
+            self.edited_contours.append(new_contour)
             self.redraw_preview()
+            
+        self.drawing = False
             
     def setup_loading_overlay(self):
         """Setup loading overlay for processing feedback"""
@@ -515,14 +971,25 @@ class ImageEmbossGUI:
         # Bilateral Filter Diameter
         bilateral_d_frame = ttk.Frame(parent)
         bilateral_d_frame.pack(fill='x', pady=2)
+        
+        # Bilateral Diameter preset
+        bilateral_d_preset_frame = ttk.Frame(bilateral_d_frame)
+        bilateral_d_preset_frame.pack(side='left')
+        self.bilateral_d_preset_var = StringVar(value="Medium")
+        bilateral_d_preset_combo = ttk.Combobox(bilateral_d_preset_frame, textvariable=self.bilateral_d_preset_var,
+                                              values=["Small", "Medium", "Large"], state="readonly", width=8)
+        bilateral_d_preset_combo.pack(side='left')
+        bilateral_d_preset_combo.bind('<<ComboboxSelected>>', lambda e: self.on_bilateral_d_preset_change())
+        self.create_tooltip(bilateral_d_preset_combo, "Bilateral diameter presets: Small(6), Medium(9), Large(12)")
+        
         bilateral_d_label = ttk.Label(bilateral_d_frame, text="Bilateral Diameter:", width=15)
-        bilateral_d_label.pack(side='left')
+        bilateral_d_label.pack(side='left', padx=(5, 0))
         self.create_tooltip(bilateral_d_label, "Controls the neighborhood size for bilateral filtering. Larger values smooth more but may blur edges. Range: 5-15")
         
         self.bilateral_d_var = IntVar(value=9)
         self.bilateral_d_scale = ttk.Scale(bilateral_d_frame, from_=5, to=15, 
                                          variable=self.bilateral_d_var, orient='horizontal',
-                                         command=self.on_param_change)
+                                         command=self.on_slider_start_change)
         self.bilateral_d_scale.pack(side='left', fill='x', expand=True, padx=(5, 0))
         self.bilateral_d_label = ttk.Label(bilateral_d_frame, text="9")
         self.bilateral_d_label.pack(side='right', padx=(5, 0))
@@ -530,14 +997,25 @@ class ImageEmbossGUI:
         # Bilateral Sigma Color
         bilateral_c_frame = ttk.Frame(parent)
         bilateral_c_frame.pack(fill='x', pady=2)
+        
+        # Bilateral Color preset
+        bilateral_c_preset_frame = ttk.Frame(bilateral_c_frame)
+        bilateral_c_preset_frame.pack(side='left')
+        self.bilateral_c_preset_var = StringVar(value="Medium")
+        bilateral_c_preset_combo = ttk.Combobox(bilateral_c_preset_frame, textvariable=self.bilateral_c_preset_var,
+                                              values=["Low", "Medium", "High"], state="readonly", width=8)
+        bilateral_c_preset_combo.pack(side='left')
+        bilateral_c_preset_combo.bind('<<ComboboxSelected>>', lambda e: self.on_bilateral_c_preset_change())
+        self.create_tooltip(bilateral_c_preset_combo, "Bilateral color presets: Low(40), Medium(75), High(120)")
+        
         bilateral_c_label = ttk.Label(bilateral_c_frame, text="Bilateral Color σ:", width=15)
-        bilateral_c_label.pack(side='left')
-        self.create_tooltip(bilateral_c_label, "Controls color similarity threshold for bilateral filtering. Higher values allow more color variation. Range: 10-200")
+        bilateral_c_label.pack(side='left', padx=(5, 0))
+        self.create_tooltip(bilateral_c_label, "Controls color similarity threshold for bilateral filtering. Higher values allow more color variation. Range: 25-150")
         
         self.bilateral_c_var = IntVar(value=75)
         self.bilateral_c_scale = ttk.Scale(bilateral_c_frame, from_=25, to=150, 
                                          variable=self.bilateral_c_var, orient='horizontal',
-                                         command=self.on_param_change)
+                                         command=self.on_slider_start_change)
         self.bilateral_c_scale.pack(side='left', fill='x', expand=True, padx=(5, 0))
         self.bilateral_c_label = ttk.Label(bilateral_c_frame, text="75")
         self.bilateral_c_label.pack(side='right', padx=(5, 0))
@@ -545,29 +1023,57 @@ class ImageEmbossGUI:
         # Gaussian Kernel Size
         gaussian_frame = ttk.Frame(parent)
         gaussian_frame.pack(fill='x', pady=2)
+        
+        # Gaussian preset
+        gaussian_preset_frame = ttk.Frame(gaussian_frame)
+        gaussian_preset_frame.pack(side='left')
+        self.gaussian_preset_var = StringVar(value="Medium")
+        gaussian_preset_combo = ttk.Combobox(gaussian_preset_frame, textvariable=self.gaussian_preset_var,
+                                           values=["Light", "Medium", "Heavy"], state="readonly", width=8)
+        gaussian_preset_combo.pack(side='left')
+        gaussian_preset_combo.bind('<<ComboboxSelected>>', lambda e: self.on_gaussian_preset_change())
+        self.create_tooltip(gaussian_preset_combo, "Gaussian blur presets: Light(3), Medium(5), Heavy(7)")
+        
         gaussian_label = ttk.Label(gaussian_frame, text="Gaussian Kernel:", width=15)
-        gaussian_label.pack(side='left')
-        self.create_tooltip(gaussian_label, "Controls the amount of blur applied. Larger values create more smoothing. Must be odd numbers. Range: 3-15")
+        gaussian_label.pack(side='left', padx=(5, 0))
+        self.create_tooltip(gaussian_label, "Controls the amount of blur applied. Larger values create more smoothing. Must be odd numbers. Range: 3-9")
         
         self.gaussian_var = IntVar(value=5)
         self.gaussian_scale = ttk.Scale(gaussian_frame, from_=3, to=9, 
                                       variable=self.gaussian_var, orient='horizontal',
-                                      command=self.on_param_change)
+                                      command=self.on_slider_start_change)
         self.gaussian_scale.pack(side='left', fill='x', expand=True, padx=(5, 0))
         self.gaussian_label = ttk.Label(gaussian_frame, text="5")
         self.gaussian_label.pack(side='right', padx=(5, 0))
+        
+        
+        # Canny Edge Detection (Combined preset for both thresholds)
+        canny_preset_frame = ttk.Frame(parent)
+        canny_preset_frame.pack(fill='x', pady=2)
+        
+        # Canny preset
+        canny_preset_combo_frame = ttk.Frame(canny_preset_frame)
+        canny_preset_combo_frame.pack(side='left')
+        self.canny_preset_var = StringVar(value="Medium")
+        canny_preset_combo = ttk.Combobox(canny_preset_combo_frame, textvariable=self.canny_preset_var,
+                                        values=["Sensitive", "Medium", "Conservative"], state="readonly", width=10)
+        canny_preset_combo.pack(side='left')
+        canny_preset_combo.bind('<<ComboboxSelected>>', lambda e: self.on_canny_preset_change())
+        self.create_tooltip(canny_preset_combo, "Canny edge presets: Sensitive(20/60), Medium(30/100), Conservative(50/150)")
+        
+        ttk.Label(canny_preset_frame, text="Canny Edge Detection", width=20).pack(side='left', padx=(5, 0))
         
         # Canny Lower Threshold
         canny_l_frame = ttk.Frame(parent)
         canny_l_frame.pack(fill='x', pady=2)
         canny_l_label = ttk.Label(canny_l_frame, text="Canny Lower:", width=15)
         canny_l_label.pack(side='left')
-        self.create_tooltip(canny_l_label, "Lower threshold for Canny edge detection. Lower values detect more edges but may include noise. Range: 10-200")
+        self.create_tooltip(canny_l_label, "Lower threshold for Canny edge detection. Lower values detect more edges but may include noise. Range: 10-100")
         
         self.canny_l_var = IntVar(value=30)
         self.canny_l_scale = ttk.Scale(canny_l_frame, from_=10, to=100, 
                                      variable=self.canny_l_var, orient='horizontal',
-                                     command=self.on_param_change)
+                                     command=self.on_slider_start_change)
         self.canny_l_scale.pack(side='left', fill='x', expand=True, padx=(5, 0))
         self.canny_l_label = ttk.Label(canny_l_frame, text="30")
         self.canny_l_label.pack(side='right', padx=(5, 0))
@@ -577,12 +1083,12 @@ class ImageEmbossGUI:
         canny_u_frame.pack(fill='x', pady=2)
         canny_u_label = ttk.Label(canny_u_frame, text="Canny Upper:", width=15)
         canny_u_label.pack(side='left')
-        self.create_tooltip(canny_u_label, "Upper threshold for Canny edge detection. Should be 2-3x the lower threshold. Higher values detect only strong edges. Range: 50-300")
+        self.create_tooltip(canny_u_label, "Upper threshold for Canny edge detection. Should be 2-3x the lower threshold. Higher values detect only strong edges. Range: 30-200")
         
         self.canny_u_var = IntVar(value=100)
         self.canny_u_scale = ttk.Scale(canny_u_frame, from_=30, to=200, 
                                      variable=self.canny_u_var, orient='horizontal',
-                                     command=self.on_param_change)
+                                     command=self.on_slider_start_change)
         self.canny_u_scale.pack(side='left', fill='x', expand=True, padx=(5, 0))
         self.canny_u_label = ttk.Label(canny_u_frame, text="100")
         self.canny_u_label.pack(side='right', padx=(5, 0))
@@ -590,14 +1096,25 @@ class ImageEmbossGUI:
         # Edge Thickness
         thickness_frame = ttk.Frame(parent)
         thickness_frame.pack(fill='x', pady=2)
+        
+        # Edge Thickness preset
+        thickness_preset_frame = ttk.Frame(thickness_frame)
+        thickness_preset_frame.pack(side='left')
+        self.thickness_preset_var = StringVar(value="Medium")
+        thickness_preset_combo = ttk.Combobox(thickness_preset_frame, textvariable=self.thickness_preset_var,
+                                            values=["Thin", "Medium", "Thick"], state="readonly", width=8)
+        thickness_preset_combo.pack(side='left')
+        thickness_preset_combo.bind('<<ComboboxSelected>>', lambda e: self.on_thickness_preset_change())
+        self.create_tooltip(thickness_preset_combo, "Edge thickness presets: Thin(1.0), Medium(2.5), Thick(6.0)")
+        
         thickness_label = ttk.Label(thickness_frame, text="Edge Thickness:", width=15)
-        thickness_label.pack(side='left')
+        thickness_label.pack(side='left', padx=(5, 0))
         self.create_tooltip(thickness_label, "Controls how thick the detected edges become. Higher values create bolder lines but may merge nearby edges. Range: 1.0-50.0")
         
         self.thickness_var = DoubleVar(value=2.0)
         self.thickness_scale = ttk.Scale(thickness_frame, from_=1.0, to=50.0, 
                                        variable=self.thickness_var, orient='horizontal',
-                                       command=self.on_param_change)
+                                       command=self.on_slider_start_change)
         self.thickness_scale.pack(side='left', fill='x', expand=True, padx=(5, 0))
         self.thickness_label = ttk.Label(thickness_frame, text="2.0")
         self.thickness_label.pack(side='right', padx=(5, 0))
@@ -605,14 +1122,25 @@ class ImageEmbossGUI:
         # Gap Threshold slider
         gap_frame = ttk.Frame(parent)
         gap_frame.pack(fill='x', pady=2)
+        
+        # Gap Threshold preset
+        gap_preset_frame = ttk.Frame(gap_frame)
+        gap_preset_frame.pack(side='left')
+        self.gap_preset_var = StringVar(value="Medium")
+        gap_preset_combo = ttk.Combobox(gap_preset_frame, textvariable=self.gap_preset_var,
+                                      values=["None", "Light", "Medium", "Heavy"], state="readonly", width=8)
+        gap_preset_combo.pack(side='left')
+        gap_preset_combo.bind('<<ComboboxSelected>>', lambda e: self.on_gap_preset_change())
+        self.create_tooltip(gap_preset_combo, "Gap closing presets: None(0), Light(2.5), Medium(5.0), Heavy(10.0)")
+        
         gap_label = ttk.Label(gap_frame, text="Gap Threshold:", width=15)
-        gap_label.pack(side='left')
+        gap_label.pack(side='left', padx=(5, 0))
         self.create_tooltip(gap_label, "Converts small gaps between contour segments into continuous lines. Higher values connect more segments. Range: 0-20 pixels")
         
         self.gap_var = DoubleVar(value=5.0)
         self.gap_scale = ttk.Scale(gap_frame, from_=0.0, to=20.0, 
                                  variable=self.gap_var, orient='horizontal',
-                                 command=self.on_param_change)
+                                 command=self.on_slider_start_change)
         self.gap_scale.pack(side='left', fill='x', expand=True, padx=(5, 0))
         self.gap_label = ttk.Label(gap_frame, text="5.0")
         self.gap_label.pack(side='right', padx=(5, 0))
@@ -620,14 +1148,25 @@ class ImageEmbossGUI:
         # Largest N slider
         largest_frame = ttk.Frame(parent)
         largest_frame.pack(fill='x', pady=2)
+        
+        # Largest N preset
+        largest_preset_frame = ttk.Frame(largest_frame)
+        largest_preset_frame.pack(side='left')
+        self.largest_preset_var = StringVar(value="Medium")
+        largest_preset_combo = ttk.Combobox(largest_preset_frame, textvariable=self.largest_preset_var,
+                                         values=["Few", "Medium", "Many"], state="readonly", width=8)
+        largest_preset_combo.pack(side='left')
+        largest_preset_combo.bind('<<ComboboxSelected>>', lambda e: self.on_largest_preset_change())
+        self.create_tooltip(largest_preset_combo, "Contour count presets: Few(3), Medium(10), Many(30)")
+        
         largest_label = ttk.Label(largest_frame, text="Largest N:", width=15)
-        largest_label.pack(side='left')
+        largest_label.pack(side='left', padx=(5, 0))
         self.create_tooltip(largest_label, "Number of largest contours to keep. Use 1-3 for bold silhouettes, higher values for detailed images. Range: 1-50")
         
         self.largest_var = IntVar(value=10)
         self.largest_scale = ttk.Scale(largest_frame, from_=1, to=50, 
                                      variable=self.largest_var, orient='horizontal',
-                                     command=self.on_param_change)
+                                     command=self.on_slider_start_change)
         self.largest_scale.pack(side='left', fill='x', expand=True, padx=(5, 0))
         self.largest_label = ttk.Label(largest_frame, text="10")
         self.largest_label.pack(side='right', padx=(5, 0))
@@ -635,14 +1174,25 @@ class ImageEmbossGUI:
         # Simplify slider
         simplify_frame = ttk.Frame(parent)
         simplify_frame.pack(fill='x', pady=2)
+        
+        # Simplify preset
+        simplify_preset_frame = ttk.Frame(simplify_frame)
+        simplify_preset_frame.pack(side='left')
+        self.simplify_preset_var = StringVar(value="Medium")
+        simplify_preset_combo = ttk.Combobox(simplify_preset_frame, textvariable=self.simplify_preset_var,
+                                           values=["Detailed", "Medium", "Simple"], state="readonly", width=8)
+        simplify_preset_combo.pack(side='left')
+        simplify_preset_combo.bind('<<ComboboxSelected>>', lambda e: self.on_simplify_preset_change())
+        self.create_tooltip(simplify_preset_combo, "Simplification presets: Detailed(0.2), Medium(0.5), Simple(1.0)")
+        
         simplify_label = ttk.Label(simplify_frame, text="Simplify %:", width=15)
-        simplify_label.pack(side='left')
+        simplify_label.pack(side='left', padx=(5, 0))
         self.create_tooltip(simplify_label, "Reduces the number of points in contours. Higher values create simpler shapes but may lose detail. Range: 0.0-2.0%")
         
         self.simplify_var = DoubleVar(value=0.5)
         self.simplify_scale = ttk.Scale(simplify_frame, from_=0.0, to=2.0, 
                                       variable=self.simplify_var, orient='horizontal',
-                                      command=self.on_param_change)
+                                      command=self.on_slider_start_change)
         self.simplify_scale.pack(side='left', fill='x', expand=True, padx=(5, 0))
         self.simplify_label = ttk.Label(simplify_frame, text="0.5")
         self.simplify_label.pack(side='right', padx=(5, 0))
@@ -650,14 +1200,25 @@ class ImageEmbossGUI:
         # Scale slider
         scale_frame = ttk.Frame(parent)
         scale_frame.pack(fill='x', pady=2)
+        
+        # Scale preset
+        scale_preset_frame = ttk.Frame(scale_frame)
+        scale_preset_frame.pack(side='left')
+        self.scale_preset_var = StringVar(value="Medium")
+        scale_preset_combo = ttk.Combobox(scale_preset_frame, textvariable=self.scale_preset_var,
+                                        values=["Small", "Medium", "Large"], state="readonly", width=8)
+        scale_preset_combo.pack(side='left')
+        scale_preset_combo.bind('<<ComboboxSelected>>', lambda e: self.on_scale_preset_change())
+        self.create_tooltip(scale_preset_combo, "Scale presets: Small(0.15), Medium(0.25), Large(1.0)")
+        
         scale_label = ttk.Label(scale_frame, text="Scale (mm/px):", width=15)
-        scale_label.pack(side='left')
+        scale_label.pack(side='left', padx=(5, 0))
         self.create_tooltip(scale_label, "Converts pixels to millimeters in the DXF output. 0.25 means 1 pixel = 0.25mm. Range: 0.01-2.0")
         
         self.scale_var = DoubleVar(value=0.25)
         self.scale_scale = ttk.Scale(scale_frame, from_=0.01, to=2.0, 
                                    variable=self.scale_var, orient='horizontal',
-                                   command=self.on_param_change)
+                                   command=self.on_slider_start_change)
         self.scale_scale.pack(side='left', fill='x', expand=True, padx=(5, 0))
         self.scale_label = ttk.Label(scale_frame, text="0.25")
         self.scale_label.pack(side='right', padx=(5, 0))
@@ -759,7 +1320,7 @@ class ImageEmbossGUI:
         if not hasattr(self, 'preview_contours') or not self.preview_contours or self.original_image is None:
             self.dxf_canvas.delete("all")
             return
-            
+
         # Clear canvas
         self.dxf_canvas.delete("all")
         
@@ -769,7 +1330,7 @@ class ImageEmbossGUI:
         
         if canvas_width <= 1 or canvas_height <= 1:
             return
-            
+
         # Calculate base scale to fit contours in canvas
         h, w = self.original_image.shape[:2]
         base_scale = min(canvas_width/w, canvas_height/h, 1.0) * 0.9
@@ -781,10 +1342,17 @@ class ImageEmbossGUI:
         center_x = canvas_width//2 + self.pan_x
         center_y = canvas_height//2 + self.pan_y
         
-        # Draw contours with different colors based on whether they're meaningful
+        # Draw original contours (excluding erased points)
         for i, contour in enumerate(self.preview_contours):
+            if i in self.erased_contours:
+                continue
+                
             points = []
-            for point in contour:
+            for j, point in enumerate(contour):
+                # Skip erased points
+                if hasattr(self, 'erased_points') and (i, j) in self.erased_points:
+                    continue
+                    
                 x = float(point[0][0]) * scale + center_x - w*scale//2
                 y = float(point[0][1]) * scale + center_y - h*scale//2
                 points.extend([x, y])
@@ -795,98 +1363,266 @@ class ImageEmbossGUI:
                 color = 'dark green' if area > 100 else 'red'
                 # Adjust line width based on zoom
                 line_width = max(1, int(2 * self.zoom_factor))
-                self.dxf_canvas.create_polygon(points, outline=color, fill='', width=line_width)
+                # Draw as line instead of polygon to avoid auto-completion
+                self.dxf_canvas.create_line(points, fill=color, width=line_width)
+        
+        # Draw edited contours (manually added)
+        for contour in self.edited_contours:
+            points = []
+            for point in contour:
+                x = float(point[0][0]) * scale + center_x - w*scale//2
+                y = float(point[0][1]) * scale + center_y - h*scale//2
+                points.extend([x, y])
+            
+            if len(points) >= 6:  # At least 3 points (x,y pairs)
+                # Use blue for manually added contours
+                line_width = max(1, int(2 * self.zoom_factor))
+                self.dxf_canvas.create_line(points, fill='blue', width=line_width)
     
     def on_param_change(self, event=None):
+        # Check if user has made edits
+        if self.has_edits():
+            result = messagebox.askyesnocancel(
+                "Unsaved Edits",
+                "You have unsaved edits (eraser or paint strokes).\n\n"
+                "Changing parameters will lose your edits.\n\n"
+                "Do you want to continue and lose your edits?",
+                icon='warning'
+            )
+            if result is None:  # Cancel
+                # Revert slider values to previous state
+                self.revert_slider_values()
+                return
+            elif result is False:  # No
+                # Revert slider values to previous state
+                self.revert_slider_values()
+                return
+            # If result is True (Yes), continue with parameter change
+        
         # Set preset to Custom when user manually changes parameters
         if self.preset_var.get() != "Custom":
             self.preset_var.set("Custom")
         self.update_preview()
+    
+    def has_edits(self):
+        """Check if user has made any edits"""
+        return len(self.edited_contours) > 0 or len(self.erased_contours) > 0 or len(self.erased_points) > 0
+    
+    def store_slider_values(self):
+        """Store current slider values for potential reverting"""
+        self.previous_slider_values = {
+            "bilateral_d": self.bilateral_d_var.get(),
+            "bilateral_c": self.bilateral_c_var.get(),
+            "gaussian": self.gaussian_var.get(),
+            "canny_l": self.canny_l_var.get(),
+            "canny_u": self.canny_u_var.get(),
+            "thickness": self.thickness_var.get(),
+            "gap": self.gap_var.get(),
+            "largest": self.largest_var.get(),
+            "simplify": self.simplify_var.get(),
+            "scale": self.scale_var.get(),
+            "invert": self.invert_var.get()
+        }
+    
+    def revert_slider_values(self):
+        """Revert slider values to previous state"""
+        if not self.previous_slider_values:
+            return
+            
+        self.bilateral_d_var.set(self.previous_slider_values["bilateral_d"])
+        self.bilateral_c_var.set(self.previous_slider_values["bilateral_c"])
+        self.gaussian_var.set(self.previous_slider_values["gaussian"])
+        self.canny_l_var.set(self.previous_slider_values["canny_l"])
+        self.canny_u_var.set(self.previous_slider_values["canny_u"])
+        self.thickness_var.set(self.previous_slider_values["thickness"])
+        self.gap_var.set(self.previous_slider_values["gap"])
+        self.largest_var.set(self.previous_slider_values["largest"])
+        self.simplify_var.set(self.previous_slider_values["simplify"])
+        self.scale_var.set(self.previous_slider_values["scale"])
+        self.invert_var.set(self.previous_slider_values["invert"])
+        
+        # Update labels to reflect reverted values
+        self.bilateral_d_label.config(text=str(self.previous_slider_values["bilateral_d"]))
+        self.bilateral_c_label.config(text=str(self.previous_slider_values["bilateral_c"]))
+        self.gaussian_label.config(text=str(self.previous_slider_values["gaussian"]))
+        self.canny_l_label.config(text=str(self.previous_slider_values["canny_l"]))
+        self.canny_u_label.config(text=str(self.previous_slider_values["canny_u"]))
+        self.thickness_label.config(text=f"{self.previous_slider_values['thickness']:.1f}")
+        self.gap_label.config(text=f"{self.previous_slider_values['gap']:.1f}")
+        self.largest_label.config(text=str(self.previous_slider_values["largest"]))
+        self.simplify_label.config(text=f"{self.previous_slider_values['simplify']:.1f}")
+        self.scale_label.config(text=f"{self.previous_slider_values['scale']:.3f}")
+    
+    def on_slider_start_change(self, event=None):
+        """Called when slider starts changing - store current values first"""
+        # Store current values before any change
+        self.store_slider_values()
+        # Then proceed with normal parameter change
+        self.on_param_change(event)
+    
+    # Individual preset change methods
+    def on_bilateral_d_preset_change(self):
+        presets = {"Small": 6, "Medium": 9, "Large": 12}
+        preset = self.bilateral_d_preset_var.get()
+        if preset in presets:
+            self.store_slider_values()  # Store before change
+            self.bilateral_d_var.set(presets[preset])
+            self.bilateral_d_label.config(text=str(presets[preset]))
+            self.on_param_change()
+    
+    def on_bilateral_c_preset_change(self):
+        presets = {"Low": 40, "Medium": 75, "High": 120}
+        preset = self.bilateral_c_preset_var.get()
+        if preset in presets:
+            self.store_slider_values()
+            self.bilateral_c_var.set(presets[preset])
+            self.bilateral_c_label.config(text=str(presets[preset]))
+            self.on_param_change()
+    
+    def on_gaussian_preset_change(self):
+        presets = {"Light": 3, "Medium": 5, "Heavy": 7}
+        preset = self.gaussian_preset_var.get()
+        if preset in presets:
+            self.store_slider_values()
+            self.gaussian_var.set(presets[preset])
+            self.gaussian_label.config(text=str(presets[preset]))
+            self.on_param_change()
+    
+    def on_canny_preset_change(self):
+        presets = {
+            "Sensitive": {"lower": 20, "upper": 60},
+            "Medium": {"lower": 30, "upper": 100},
+            "Conservative": {"lower": 50, "upper": 150}
+        }
+        preset = self.canny_preset_var.get()
+        if preset in presets:
+            self.store_slider_values()
+            self.canny_l_var.set(presets[preset]["lower"])
+            self.canny_u_var.set(presets[preset]["upper"])
+            self.canny_l_label.config(text=str(presets[preset]["lower"]))
+            self.canny_u_label.config(text=str(presets[preset]["upper"]))
+            self.on_param_change()
+    
+    def on_thickness_preset_change(self):
+        presets = {"Thin": 1.0, "Medium": 2.5, "Thick": 6.0}
+        preset = self.thickness_preset_var.get()
+        if preset in presets:
+            self.store_slider_values()
+            self.thickness_var.set(presets[preset])
+            self.thickness_label.config(text=str(presets[preset]))
+            self.on_param_change()
+    
+    def on_gap_preset_change(self):
+        presets = {"None": 0.0, "Light": 2.5, "Medium": 5.0, "Heavy": 10.0}
+        preset = self.gap_preset_var.get()
+        if preset in presets:
+            self.store_slider_values()
+            self.gap_var.set(presets[preset])
+            self.gap_label.config(text=str(presets[preset]))
+            self.on_param_change()
+    
+    def on_largest_preset_change(self):
+        presets = {"Few": 3, "Medium": 10, "Many": 30}
+        preset = self.largest_preset_var.get()
+        if preset in presets:
+            self.store_slider_values()
+            self.largest_var.set(presets[preset])
+            self.largest_label.config(text=str(presets[preset]))
+            self.on_param_change()
+    
+    def on_simplify_preset_change(self):
+        presets = {"Detailed": 0.2, "Medium": 0.5, "Simple": 1.0}
+        preset = self.simplify_preset_var.get()
+        if preset in presets:
+            self.store_slider_values()
+            self.simplify_var.set(presets[preset])
+            self.simplify_label.config(text=str(presets[preset]))
+            self.on_param_change()
+    
+    def on_scale_preset_change(self):
+        presets = {"Small": 0.15, "Medium": 0.25, "Large": 1.0}
+        preset = self.scale_preset_var.get()
+        if preset in presets:
+            self.store_slider_values()
+            self.scale_var.set(presets[preset])
+            self.scale_label.config(text=str(presets[preset]))
+            self.on_param_change()
+    
+    def on_export_scale_change(self, event=None):
+        """Update output size display when export scale changes"""
+        if self.original_image is not None:
+            try:
+                scale = float(self.export_scale_var.get())
+                if scale > 0:
+                    h, w = self.original_image.shape[:2]
+                    new_h = int(h * scale)
+                    new_w = int(w * scale)
+                    self.output_size_label.config(text=f"Output: {new_w}×{new_h}px")
+                else:
+                    self.output_size_label.config(text="Invalid scale")
+            except ValueError:
+                self.output_size_label.config(text="Invalid scale")
+    
         
     def on_preset_change(self, event=None):
         preset = self.preset_var.get()
         if preset == "Custom":
             return
-            
-        # Define presets (matching your previous application)
-        presets = {
-            "Default": {
-                "bilateral_diameter": 9,
-                "bilateral_sigma_color": 75,
-                "gaussian_kernel_size": 5,
-                "canny_lower_threshold": 30,
-                "canny_upper_threshold": 100,
-                "edge_thickness": 2.0,
-                "gap_threshold": 5.0,
-                "largest_n": 10,
-                "simplify_pct": 0.5,
-                "mm_per_px": 0.25,
-                "invert": True
-            },
-            "High Detail": {
-                "bilateral_diameter": 7,
-                "bilateral_sigma_color": 50,
-                "gaussian_kernel_size": 3,
-                "canny_lower_threshold": 20,
-                "canny_upper_threshold": 80,
-                "edge_thickness": 1.5,
-                "gap_threshold": 3.0,
-                "largest_n": 15,
-                "simplify_pct": 0.3,
-                "mm_per_px": 0.25,
-                "invert": True
-            },
-            "Low Noise": {
-                "bilateral_diameter": 11,
-                "bilateral_sigma_color": 100,
-                "gaussian_kernel_size": 7,
-                "canny_lower_threshold": 40,
-                "canny_upper_threshold": 120,
-                "edge_thickness": 2.5,
-                "gap_threshold": 6.0,
-                "largest_n": 8,
-                "simplify_pct": 0.6,
-                "mm_per_px": 0.25,
-                "invert": True
-            },
-            "Strong Edges": {
-                "bilateral_diameter": 9,
-                "bilateral_sigma_color": 75,
-                "gaussian_kernel_size": 5,
-                "canny_lower_threshold": 50,
-                "canny_upper_threshold": 150,
-                "edge_thickness": 3.0,
-                "gap_threshold": 7.0,
-                "largest_n": 5,
-                "simplify_pct": 0.8,
-                "mm_per_px": 0.25,
-                "invert": True
-            }
-        }
-        
-        if preset in presets:
-            # Update all sliders with preset values
-            preset_params = presets[preset]
-            self.bilateral_d_var.set(preset_params["bilateral_diameter"])
-            self.bilateral_c_var.set(preset_params["bilateral_sigma_color"])
-            self.gaussian_var.set(preset_params["gaussian_kernel_size"])
-            self.canny_l_var.set(preset_params["canny_lower_threshold"])
-            self.canny_u_var.set(preset_params["canny_upper_threshold"])
-            self.thickness_var.set(preset_params["edge_thickness"])
-            self.gap_var.set(preset_params["gap_threshold"])
-            self.largest_var.set(preset_params["largest_n"])
-            self.simplify_var.set(preset_params["simplify_pct"])
-            self.scale_var.set(preset_params["mm_per_px"])
-            self.invert_var.set(preset_params["invert"])
-            
-            # Update preview
-            self.update_preview()
+
+        config = self.preset_configs.get(preset)
+        if not config:
+            return
+
+        # Store current values before applying preset
+        self.store_slider_values()
+
+        # Apply preset values directly to tkinter variables
+        self.bilateral_d_var.set(config["bilateral_diameter"])
+        self.bilateral_c_var.set(config["bilateral_sigma_color"])
+        self.gaussian_var.set(config["gaussian_kernel_size"])
+        self.canny_l_var.set(config["canny_lower_threshold"])
+        self.canny_u_var.set(config["canny_upper_threshold"])
+        self.thickness_var.set(config["edge_thickness"])
+        self.gap_var.set(config["gap_threshold"])
+        self.largest_var.set(config["largest_n"])
+        self.simplify_var.set(config["simplify_pct"])
+        self.scale_var.set(config["mm_per_px"])
+        self.invert_var.set(config["invert"])
+
+        # Update labels to reflect new values
+        self.bilateral_d_label.config(text=str(config["bilateral_diameter"]))
+        self.bilateral_c_label.config(text=str(config["bilateral_sigma_color"]))
+        self.gaussian_label.config(text=str(config["gaussian_kernel_size"]))
+        self.canny_l_label.config(text=str(config["canny_lower_threshold"]))
+        self.canny_u_label.config(text=str(config["canny_upper_threshold"]))
+        self.thickness_label.config(text=str(config["edge_thickness"]))
+        self.gap_label.config(text=str(config["gap_threshold"]))
+        self.largest_label.config(text=str(config["largest_n"]))
+        self.simplify_label.config(text=str(config["simplify_pct"]))
+        self.scale_label.config(text=str(config["mm_per_px"]))
+
+        # Reset zoom/pan when preset changes
+        self.zoom_reset()
+        self.pan_reset()
+
+        # Update preview
+        self.update_preview()
         
     def export_dxf(self):
         if self.image_path is None:
             messagebox.showwarning("Warning", "No image loaded.")
             return
             
+        # Validate export scale
+        try:
+            export_scale = float(self.export_scale_var.get())
+            if export_scale <= 0:
+                messagebox.showerror("Error", "Export scale must be greater than 0.")
+                return
+        except ValueError:
+            messagebox.showerror("Error", "Invalid export scale value.")
+            return
+
         self.show_loading("Preparing DXF export...")
         
         try:
@@ -896,11 +1632,25 @@ class ImageEmbossGUI:
                                                self.params["simplify_pct"],
                                                self.params["gap_threshold"])
             
-            if not export_contours:
+            # Filter out erased contours and add edited contours
+            filtered_contours = []
+            for i, contour in enumerate(export_contours):
+                if i not in self.erased_contours:
+                    filtered_contours.append(contour)
+            
+            # Add manually edited contours
+            filtered_contours.extend(self.edited_contours)
+            
+            if not filtered_contours:
                 messagebox.showwarning("Warning", "No contours found for export.")
                 return
                 
-            default_name = os.path.splitext(os.path.basename(self.image_path))[0] + "_silhouette.dxf"
+            # Get scaled dimensions for filename
+            h, w = self.original_image.shape[:2]
+            new_h, new_w = int(h * export_scale), int(w * export_scale)
+            base_name = os.path.splitext(os.path.basename(self.image_path))[0]
+            default_name = f"{base_name}_{new_w}x{new_h}.dxf"
+            
             out_path = filedialog.asksaveasfilename(
                 title="Save DXF as",
                 defaultextension=".dxf",
@@ -909,9 +1659,13 @@ class ImageEmbossGUI:
             )
             
             if out_path:
-                export_dxf(export_contours, out_path, self.current_mask.shape[:2], 
-                          self.params["mm_per_px"])
-                messagebox.showinfo("Success", f"DXF saved to:\n{out_path}")
+                # Calculate the effective mm_per_px based on export scale
+                # The scale slider controls the base mm_per_px, export scale multiplies the output size
+                effective_mm_per_px = self.params["mm_per_px"] / export_scale
+                
+                export_dxf(filtered_contours, out_path, self.current_mask.shape[:2], 
+                          effective_mm_per_px)
+                messagebox.showinfo("Success", f"DXF saved to:\n{out_path}\nSize: {new_w}×{new_h}px")
                 
         except Exception as e:
             messagebox.showerror("Error", f"Export failed: {str(e)}")

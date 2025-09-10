@@ -461,10 +461,26 @@ class ImageEmbossGUI:
         # Edit controls
         ttk.Label(nav_frame, text="Edit:").pack(side='left', padx=(5, 2))
         self.edit_mode_var = StringVar(value="view")
-        ttk.Button(nav_frame, text="✏️", width=3, command=lambda: self.set_edit_mode("paint")).pack(side='left', padx=1)
-        ttk.Button(nav_frame, text="🧽", width=3, command=lambda: self.set_edit_mode("eraser")).pack(side='left', padx=1)
-        ttk.Button(nav_frame, text="📐", width=3, command=lambda: self.set_edit_mode("shapes")).pack(side='left', padx=1)
-        ttk.Button(nav_frame, text="👁️", width=3, command=lambda: self.set_edit_mode("view")).pack(side='left', padx=1)
+        
+        # Paint tool
+        paint_btn = ttk.Button(nav_frame, text="✏️", width=3, command=lambda: self.set_edit_mode("paint"))
+        paint_btn.pack(side='left', padx=1)
+        self.create_tooltip(paint_btn, "Paint tool - Draw freehand lines")
+        
+        # Eraser tool
+        eraser_btn = ttk.Button(nav_frame, text="🧽", width=3, command=lambda: self.set_edit_mode("eraser"))
+        eraser_btn.pack(side='left', padx=1)
+        self.create_tooltip(eraser_btn, "Eraser tool - Erase parts of contours")
+        
+        # Line tool
+        line_btn = ttk.Button(nav_frame, text="📏", width=3, command=lambda: self.set_edit_mode("line"))
+        line_btn.pack(side='left', padx=1)
+        self.create_tooltip(line_btn, "Line tool - Draw straight lines")
+        
+        # View tool
+        view_btn = ttk.Button(nav_frame, text="👁️", width=3, command=lambda: self.set_edit_mode("view"))
+        view_btn.pack(side='left', padx=1)
+        self.create_tooltip(view_btn, "View tool - Pan and zoom (default mode)")
         
         # Shape selection
         self.shape_type_var = StringVar(value="rectangle")
@@ -472,6 +488,12 @@ class ImageEmbossGUI:
                                  values=["rectangle", "triangle", "circle"], 
                                  state="readonly", width=8)
         shape_combo.pack(side='left', padx=(5, 0))
+        self.create_tooltip(shape_combo, "Select shape type for the shape tool")
+        
+        # Shape tool (moved to the right of the dropdown)
+        shape_btn = ttk.Button(nav_frame, text="📐", width=3, command=lambda: self.set_edit_mode("shapes"))
+        shape_btn.pack(side='left', padx=(5, 0))
+        self.create_tooltip(shape_btn, "Shape tool - Draw rectangles, triangles, circles")
         
         self.dxf_canvas = Canvas(right_frame, bg='white')
         self.dxf_canvas.pack(fill='both', expand=True)
@@ -630,6 +652,8 @@ class ImageEmbossGUI:
         elif self.edit_mode == "paint":
             self.drawing = True
             self.drawing_points = [(event.x, event.y)]
+        elif self.edit_mode == "line":
+            self.start_line_drawing(event.x, event.y)
         elif self.edit_mode == "shapes":
             self.start_shape_drawing(event.x, event.y)
         
@@ -650,6 +674,10 @@ class ImageEmbossGUI:
             if self.drawing:
                 self.drawing_points.append((event.x, event.y))
                 self.draw_temporary_line()
+        elif self.edit_mode == "line":
+            # Line mode - show temporary line
+            if self.drawing:
+                self.draw_temporary_line(event.x, event.y)
         elif self.edit_mode == "eraser":
             # Eraser mode - erase along the drag path
             self.erase_along_path(event.x, event.y)
@@ -658,11 +686,22 @@ class ImageEmbossGUI:
         """Handle canvas release for finishing drawing"""
         if self.edit_mode == "paint" and self.drawing:
             self.finish_paint_stroke()
+        elif self.edit_mode == "line" and self.drawing:
+            self.finish_line_drawing(event.x, event.y)
         elif self.edit_mode == "shapes":
             self.finish_shape_drawing(event.x, event.y)
             
     def set_edit_mode(self, mode):
         """Set the current edit mode"""
+        # Clean up previous mode
+        if self.edit_mode == "eraser":
+            # Hide eraser circle and unbind events
+            if hasattr(self, 'eraser_circle') and self.eraser_circle:
+                self.dxf_canvas.delete(self.eraser_circle)
+                self.eraser_circle = None
+            self.dxf_canvas.unbind("<Motion>")
+            self.dxf_canvas.unbind("<Leave>")
+        
         self.edit_mode = mode
         self.drawing = False
         self.drawing_points = []
@@ -672,6 +711,8 @@ class ImageEmbossGUI:
             self.dxf_canvas.config(cursor="")
         elif mode == "paint":
             self.dxf_canvas.config(cursor="pencil")
+        elif mode == "line":
+            self.dxf_canvas.config(cursor="crosshair")
         elif mode == "eraser":
             # Create a custom eraser cursor (gray circle)
             self.dxf_canvas.config(cursor="")
@@ -709,19 +750,27 @@ class ImageEmbossGUI:
             self.dxf_canvas.delete(self.eraser_circle)
             self.eraser_circle = None
             
-    def draw_temporary_line(self):
-        """Draw temporary line while painting"""
-        if len(self.drawing_points) >= 2:
-            # Clear previous temporary line
-            self.dxf_canvas.delete("temp_line")
-            # Draw new temporary line
+    def draw_temporary_line(self, end_x=None, end_y=None):
+        """Draw temporary line while painting or drawing line"""
+        # Clear previous temporary line
+        self.dxf_canvas.delete("temp_line")
+        
+        if self.edit_mode == "paint" and len(self.drawing_points) >= 2:
+            # Draw freehand line
             points = []
             for x, y in self.drawing_points:
                 points.extend([x, y])
             self.dxf_canvas.create_line(points, fill="blue", width=2, tags="temp_line")
+        elif self.edit_mode == "line" and hasattr(self, 'line_start_x') and end_x is not None:
+            # Draw straight line
+            self.dxf_canvas.create_line(self.line_start_x, self.line_start_y, end_x, end_y, 
+                                      fill="blue", width=2, tags="temp_line")
             
     def finish_paint_stroke(self):
         """Finish a paint stroke and add it to contours"""
+        if self.original_image is None:
+            return
+            
         if len(self.drawing_points) >= 2:
             # Convert canvas coordinates to image coordinates
             image_points = []
@@ -749,8 +798,54 @@ class ImageEmbossGUI:
         self.drawing_points = []
         self.dxf_canvas.delete("temp_line")
         
+    def start_line_drawing(self, x, y):
+        """Start drawing a straight line"""
+        self.line_start_x = x
+        self.line_start_y = y
+        self.drawing = True
+        
+    def finish_line_drawing(self, x, y):
+        """Finish drawing a straight line"""
+        if self.original_image is None:
+            return
+            
+        if not self.drawing:
+            return
+            
+        # Create line points
+        line_points = [
+            [[self.line_start_x, self.line_start_y]],
+            [[x, y]]
+        ]
+        
+        # Convert to image coordinates and add as contour
+        image_points = []
+        canvas_width = self.dxf_canvas.winfo_width()
+        canvas_height = self.dxf_canvas.winfo_height()
+        h, w = self.original_image.shape[:2]
+        base_scale = min(canvas_width/w, canvas_height/h, 1.0) * 0.9
+        scale = base_scale * self.zoom_factor
+        center_x = canvas_width//2 + self.pan_x
+        center_y = canvas_height//2 + self.pan_y
+        
+        for point in line_points:
+            img_x = (point[0][0] - center_x + w*scale//2) / scale
+            img_y = (point[0][1] - center_y + h*scale//2) / scale
+            image_points.append([[int(img_x), int(img_y)]])
+        
+        if len(image_points) >= 2:
+            new_contour = np.array(image_points, dtype=np.int32)
+            self.edited_contours.append(new_contour)
+            self.redraw_preview()
+            
+        self.drawing = False
+        self.dxf_canvas.delete("temp_line")
+        
     def erase_along_path(self, x, y):
         """Erase along the drag path by modifying contours"""
+        if self.original_image is None:
+            return
+            
         if not hasattr(self, 'last_erase_x'):
             self.last_erase_x = x
             self.last_erase_y = y
@@ -828,6 +923,9 @@ class ImageEmbossGUI:
         
     def finish_shape_drawing(self, x, y):
         """Finish drawing a shape"""
+        if self.original_image is None:
+            return
+            
         if not self.drawing:
             return
             
@@ -838,23 +936,24 @@ class ImageEmbossGUI:
                 [[self.shape_start_x, self.shape_start_y]],
                 [[x, self.shape_start_y]],
                 [[x, y]],
-                [[self.shape_start_x, y]]
+                [[self.shape_start_x, y]],
+                [[self.shape_start_x, self.shape_start_y]]  # Close the rectangle
             ]
         elif shape_type == "triangle":
-            # Equilateral triangle
-            mid_x = (self.shape_start_x + x) / 2
-            height = abs(y - self.shape_start_y)
+            # Create a proper triangle with all three sides
             if y < self.shape_start_y:  # Triangle pointing up
                 shape_points = [
                     [[self.shape_start_x, y]],  # Bottom left
                     [[x, y]],                   # Bottom right
-                    [[mid_x, self.shape_start_y]]  # Top center
+                    [[(self.shape_start_x + x) / 2, self.shape_start_y]],  # Top center
+                    [[self.shape_start_x, y]]   # Close the triangle (back to start)
                 ]
             else:  # Triangle pointing down
                 shape_points = [
                     [[self.shape_start_x, self.shape_start_y]],  # Top left
                     [[x, self.shape_start_y]],                   # Top right
-                    [[mid_x, y]]                                 # Bottom center
+                    [[(self.shape_start_x + x) / 2, y]],         # Bottom center
+                    [[self.shape_start_x, self.shape_start_y]]   # Close the triangle (back to start)
                 ]
         elif shape_type == "circle":
             # Create circle points
@@ -870,6 +969,8 @@ class ImageEmbossGUI:
                 px = center_x + radius * math.cos(angle)
                 py = center_y + radius * math.sin(angle)
                 shape_points.append([[px, py]])
+            # Close the circle by adding the first point again
+            shape_points.append([[center_x + radius, center_y]])
         
         # Convert to image coordinates and add as contour
         image_points = []
@@ -1397,7 +1498,8 @@ class ImageEmbossGUI:
                 # Revert slider values to previous state
                 self.revert_slider_values()
                 return
-            # If result is True (Yes), continue with parameter change
+            # If result is True (Yes), clear edits and continue with parameter change
+            self.clear_edits()
         
         # Set preset to Custom when user manually changes parameters
         if self.preset_var.get() != "Custom":
@@ -1407,6 +1509,19 @@ class ImageEmbossGUI:
     def has_edits(self):
         """Check if user has made any edits"""
         return len(self.edited_contours) > 0 or len(self.erased_contours) > 0 or len(self.erased_points) > 0
+    
+    def clear_edits(self):
+        """Clear all user edits"""
+        self.edited_contours = []
+        self.erased_contours = set()
+        self.erased_points = set()
+        # Reset edit mode to view
+        self.edit_mode = "view"
+        self.dxf_canvas.config(cursor="")
+        # Hide eraser circle if visible
+        if hasattr(self, 'eraser_circle') and self.eraser_circle:
+            self.dxf_canvas.delete(self.eraser_circle)
+            self.eraser_circle = None
     
     def store_slider_values(self):
         """Store current slider values for potential reverting"""
@@ -1636,7 +1751,13 @@ class ImageEmbossGUI:
             filtered_contours = []
             for i, contour in enumerate(export_contours):
                 if i not in self.erased_contours:
-                    filtered_contours.append(contour)
+                    # Filter out individual erased points within contours
+                    filtered_contour = []
+                    for j, point in enumerate(contour):
+                        if (i, j) not in self.erased_points:
+                            filtered_contour.append(point)
+                    if len(filtered_contour) >= 3:  # Only add if enough points remain
+                        filtered_contours.append(np.array(filtered_contour, dtype=np.int32))
             
             # Add manually edited contours
             filtered_contours.extend(self.edited_contours)

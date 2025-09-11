@@ -13,11 +13,11 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QProgressBar, QStatusBar, QMenuBar, QToolBar,
                                QGraphicsItem, QGraphicsEllipseItem, QGraphicsRectItem,
                                QGraphicsPolygonItem, QGraphicsLineItem, QGraphicsPathItem,
-                               QTabWidget)
-from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint, QRect, QSize, QPointF, QMimeData
+                               QTabWidget, QButtonGroup)
+from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint, QRect, QSize, QPointF, QMimeData, QLineF
 from PySide6.QtGui import (QPixmap, QImage, QPainter, QPen, QBrush, QColor, 
                            QFont, QAction, QDragEnterEvent, QDropEvent,
-                           QPainterPath, QPolygonF, QTransform)
+                           QPainterPath, QPolygonF, QTransform, QCursor)
 
 # -------------------------
 # Helpers (unchanged from original)
@@ -183,6 +183,9 @@ class ImageGraphicsView(QGraphicsView):
     drawing_updated = Signal(QPointF)
     drawing_finished = Signal(QPointF)
     
+    # Signal for image drop
+    image_dropped = Signal(str)
+    
     def __init__(self, parent=None):
         super().__init__(parent)
         self.scene = QGraphicsScene()
@@ -238,6 +241,14 @@ class ImageGraphicsView(QGraphicsView):
             self.scene.addItem(self.image_item)
             
             # Fit image in view
+            self.fitInView(self.image_item, Qt.KeepAspectRatio)
+            self.zoom_factor = 1.0
+    
+    def resizeEvent(self, event):
+        """Handle resize events to auto-fit image"""
+        super().resizeEvent(event)
+        if self.image_item is not None:
+            # Auto-fit image when view is resized
             self.fitInView(self.image_item, Qt.KeepAspectRatio)
             self.zoom_factor = 1.0
     
@@ -534,9 +545,8 @@ class ImageGraphicsView(QGraphicsView):
             for url in urls:
                 file_path = url.toLocalFile()
                 if file_path.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff', '.webp')):
-                    # Emit signal to parent to load the image
-                    if hasattr(self.parent(), 'load_image_from_path'):
-                        self.parent().load_image_from_path(file_path)
+                    # Emit signal to load the image
+                    self.image_dropped.emit(file_path)
                     event.acceptProposedAction()
                     return
         event.ignore()
@@ -548,8 +558,8 @@ class ImageEmbossGUI(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Image Emboss - Image to DXF Converter")
-        # Set to fullscreen
-        self.showMaximized()
+        # Set initial window size to be large
+        self.setGeometry(100, 100, 1600, 1000)
         
         # Data
         self.original_image = None
@@ -628,6 +638,15 @@ class ImageEmbossGUI(QMainWindow):
         self.setup_menu()
         self.setup_status_bar()
         
+        # Show window first, then maximize
+        self.show()
+        
+        # Maximize after window is shown
+        QTimer.singleShot(100, self.force_maximize)
+        
+        # Fit images to view after window is maximized
+        QTimer.singleShot(200, self.fit_images_to_view)
+        
     def setup_ui(self):
         """Setup the main user interface"""
         central_widget = QWidget()
@@ -635,19 +654,21 @@ class ImageEmbossGUI(QMainWindow):
         
         # Main layout - horizontal split (left and right panels)
         main_layout = QHBoxLayout(central_widget)
+        main_layout.setContentsMargins(5, 5, 5, 5)  # Small margins
         
         # Left panel - original image and parameters
         left_panel = self.create_left_panel()
-        main_layout.addWidget(left_panel, 1)
+        main_layout.addWidget(left_panel, 1)  # Equal space
         
         # Right panel - DXF preview and tools
         right_panel = self.create_right_panel()
-        main_layout.addWidget(right_panel, 1)
+        main_layout.addWidget(right_panel, 1)  # Equal space
     
     def create_left_panel(self):
         """Create the left panel with original image and parameters"""
         frame = QFrame()
         layout = QVBoxLayout(frame)
+        layout.setContentsMargins(2, 2, 2, 2)  # Small margins
         
         # Top section - file selection
         top_frame = self.create_file_selection_frame()
@@ -656,16 +677,19 @@ class ImageEmbossGUI(QMainWindow):
         # Middle section - original image
         original_group = QGroupBox("Original Image")
         original_layout = QVBoxLayout(original_group)
+        original_layout.setContentsMargins(2, 2, 2, 2)  # Small margins
         
         self.original_view = ImageGraphicsView()
-        self.original_view.setMinimumSize(400, 300)
+        self.original_view.setMinimumSize(100, 100)  # Much smaller minimum
+        self.original_view.image_dropped.connect(self.load_image_from_path)
         original_layout.addWidget(self.original_view)
         
-        layout.addWidget(original_group, 2)  # 2/3 of space for image
+        layout.addWidget(original_group, 4)  # Even more space for image
         
         # Bottom section - parameters
         params_group = QGroupBox("Parameters")
         params_layout = QVBoxLayout(params_group)
+        params_layout.setContentsMargins(2, 2, 2, 2)  # Small margins
         
         # Master preset
         preset_frame = QFrame()
@@ -687,7 +711,7 @@ class ImageEmbossGUI(QMainWindow):
         self.create_export_tab()
         params_layout.addWidget(self.tab_widget)
         
-        layout.addWidget(params_group, 1)  # 1/3 of space for parameters
+        layout.addWidget(params_group, 1)  # Less space for parameters
         
         return frame
     
@@ -695,6 +719,7 @@ class ImageEmbossGUI(QMainWindow):
         """Create the right panel with DXF preview and tools"""
         frame = QFrame()
         layout = QVBoxLayout(frame)
+        layout.setContentsMargins(2, 2, 2, 2)  # Small margins
         
         # Top section - export controls
         export_frame = self.create_export_frame()
@@ -707,9 +732,11 @@ class ImageEmbossGUI(QMainWindow):
         # DXF preview - takes remaining space
         dxf_group = QGroupBox("DXF Preview")
         dxf_layout = QVBoxLayout(dxf_group)
+        dxf_layout.setContentsMargins(2, 2, 2, 2)  # Small margins
         
         self.dxf_view = ImageGraphicsView()
-        self.dxf_view.setMinimumSize(400, 300)
+        self.dxf_view.setMinimumSize(100, 100)  # Much smaller minimum
+        self.dxf_view.image_dropped.connect(self.load_image_from_path)
         dxf_layout.addWidget(self.dxf_view)
         
         layout.addWidget(dxf_group, 1)  # Takes all remaining space
@@ -723,11 +750,14 @@ class ImageEmbossGUI(QMainWindow):
         
         # Bilateral Diameter
         bilateral_d_layout = QHBoxLayout()
-        bilateral_d_layout.addWidget(QLabel("Bilateral Diameter:"))
+        bilateral_d_label = QLabel("Bilateral Diameter:")
+        bilateral_d_label.setToolTip("Controls how much the image is smoothed while preserving edges. Higher values smooth more but may blur important details.")
+        bilateral_d_layout.addWidget(bilateral_d_label)
         
         self.bilateral_d_slider = QSlider(Qt.Horizontal)
         self.bilateral_d_slider.setRange(5, 15)
         self.bilateral_d_slider.setValue(9)
+        self.bilateral_d_slider.setToolTip("Controls how much the image is smoothed while preserving edges. Higher values smooth more but may blur important details.")
         self.bilateral_d_slider.valueChanged.connect(self.on_param_change)
         bilateral_d_layout.addWidget(self.bilateral_d_slider)
         
@@ -739,11 +769,14 @@ class ImageEmbossGUI(QMainWindow):
         
         # Bilateral Sigma Color
         bilateral_c_layout = QHBoxLayout()
-        bilateral_c_layout.addWidget(QLabel("Bilateral Color σ:"))
+        bilateral_c_label = QLabel("Bilateral Color σ:")
+        bilateral_c_label.setToolTip("Controls how similar colors need to be to be smoothed together. Higher values allow more different colors to be smoothed.")
+        bilateral_c_layout.addWidget(bilateral_c_label)
         
         self.bilateral_c_slider = QSlider(Qt.Horizontal)
         self.bilateral_c_slider.setRange(25, 150)
         self.bilateral_c_slider.setValue(75)
+        self.bilateral_c_slider.setToolTip("Controls how similar colors need to be to be smoothed together. Higher values allow more different colors to be smoothed.")
         self.bilateral_c_slider.valueChanged.connect(self.on_param_change)
         bilateral_c_layout.addWidget(self.bilateral_c_slider)
         
@@ -755,11 +788,14 @@ class ImageEmbossGUI(QMainWindow):
         
         # Gaussian Kernel Size
         gaussian_layout = QHBoxLayout()
-        gaussian_layout.addWidget(QLabel("Gaussian Kernel:"))
+        gaussian_label = QLabel("Gaussian Kernel:")
+        gaussian_label.setToolTip("Controls the amount of blur applied to the image. Higher values create more blur, which can help reduce noise but may soften important edges.")
+        gaussian_layout.addWidget(gaussian_label)
         
         self.gaussian_slider = QSlider(Qt.Horizontal)
         self.gaussian_slider.setRange(3, 9)
         self.gaussian_slider.setValue(5)
+        self.gaussian_slider.setToolTip("Controls the amount of blur applied to the image. Higher values create more blur, which can help reduce noise but may soften important edges.")
         self.gaussian_slider.valueChanged.connect(self.on_param_change)
         gaussian_layout.addWidget(self.gaussian_slider)
         
@@ -778,11 +814,14 @@ class ImageEmbossGUI(QMainWindow):
         
         # Canny Lower Threshold
         canny_l_layout = QHBoxLayout()
-        canny_l_layout.addWidget(QLabel("Canny Lower:"))
+        canny_l_label = QLabel("Canny Lower:")
+        canny_l_label.setToolTip("Lower threshold for edge detection. Lower values detect more edges (including weak ones), higher values only detect strong edges.")
+        canny_l_layout.addWidget(canny_l_label)
         
         self.canny_l_slider = QSlider(Qt.Horizontal)
         self.canny_l_slider.setRange(10, 100)
         self.canny_l_slider.setValue(30)
+        self.canny_l_slider.setToolTip("Lower threshold for edge detection. Lower values detect more edges (including weak ones), higher values only detect strong edges.")
         self.canny_l_slider.valueChanged.connect(self.on_param_change)
         canny_l_layout.addWidget(self.canny_l_slider)
         
@@ -794,11 +833,14 @@ class ImageEmbossGUI(QMainWindow):
         
         # Canny Upper Threshold
         canny_u_layout = QHBoxLayout()
-        canny_u_layout.addWidget(QLabel("Canny Upper:"))
+        canny_u_label = QLabel("Canny Upper:")
+        canny_u_label.setToolTip("Upper threshold for edge detection. Higher values only detect very strong edges, lower values include more edges.")
+        canny_u_layout.addWidget(canny_u_label)
         
         self.canny_u_slider = QSlider(Qt.Horizontal)
         self.canny_u_slider.setRange(30, 200)
         self.canny_u_slider.setValue(100)
+        self.canny_u_slider.setToolTip("Upper threshold for edge detection. Higher values only detect very strong edges, lower values include more edges.")
         self.canny_u_slider.valueChanged.connect(self.on_param_change)
         canny_u_layout.addWidget(self.canny_u_slider)
         
@@ -810,11 +852,14 @@ class ImageEmbossGUI(QMainWindow):
         
         # Edge Thickness
         thickness_layout = QHBoxLayout()
-        thickness_layout.addWidget(QLabel("Edge Thickness:"))
+        thickness_label = QLabel("Edge Thickness:")
+        thickness_label.setToolTip("Controls how thick the lines will be in your final DXF file. Higher values create thicker lines, lower values create thinner lines.")
+        thickness_layout.addWidget(thickness_label)
         
         self.thickness_slider = QSlider(Qt.Horizontal)
         self.thickness_slider.setRange(1, 50)
         self.thickness_slider.setValue(3)  # Updated default to 3
+        self.thickness_slider.setToolTip("Controls how thick the lines will be in your final DXF file. Higher values create thicker lines, lower values create thinner lines.")
         self.thickness_slider.valueChanged.connect(self.on_param_change)
         thickness_layout.addWidget(self.thickness_slider)
         
@@ -833,11 +878,21 @@ class ImageEmbossGUI(QMainWindow):
         
         # Gap Threshold
         gap_layout = QHBoxLayout()
-        gap_layout.addWidget(QLabel("Gap Threshold:"))
+        gap_label = QLabel("Gap Threshold:")
+        gap_label.setToolTip("Controls how close edges need to be to be connected together. Higher values connect edges that are farther apart.")
+        gap_layout.addWidget(gap_label)
+        
+        self.gap_enabled_checkbox = QCheckBox("Enable")
+        self.gap_enabled_checkbox.setChecked(False)  # Default disabled
+        self.gap_enabled_checkbox.setToolTip("Enable gap threshold processing")
+        self.gap_enabled_checkbox.toggled.connect(self.on_gap_enabled_toggled)
+        gap_layout.addWidget(self.gap_enabled_checkbox)
         
         self.gap_slider = QSlider(Qt.Horizontal)
         self.gap_slider.setRange(0, 20)
         self.gap_slider.setValue(0)  # Updated default to 0
+        self.gap_slider.setEnabled(False)  # Initially disabled
+        self.gap_slider.setToolTip("Controls how close edges need to be to be connected together. Higher values connect edges that are farther apart.")
         self.gap_slider.valueChanged.connect(self.on_param_change)
         gap_layout.addWidget(self.gap_slider)
         
@@ -849,11 +904,14 @@ class ImageEmbossGUI(QMainWindow):
         
         # Largest N
         largest_layout = QHBoxLayout()
-        largest_layout.addWidget(QLabel("Largest N:"))
+        largest_label = QLabel("Largest N:")
+        largest_label.setToolTip("Controls how many of the largest shapes to keep. Higher values keep more shapes, lower values keep only the biggest ones.")
+        largest_layout.addWidget(largest_label)
         
         self.largest_slider = QSlider(Qt.Horizontal)
         self.largest_slider.setRange(1, 50)
         self.largest_slider.setValue(10)
+        self.largest_slider.setToolTip("Controls how many of the largest shapes to keep. Higher values keep more shapes, lower values keep only the biggest ones.")
         self.largest_slider.valueChanged.connect(self.on_param_change)
         largest_layout.addWidget(self.largest_slider)
         
@@ -865,11 +923,14 @@ class ImageEmbossGUI(QMainWindow):
         
         # Simplify
         simplify_layout = QHBoxLayout()
-        simplify_layout.addWidget(QLabel("Simplify %:"))
+        simplify_label = QLabel("Simplify %:")
+        simplify_label.setToolTip("Controls how much detail to remove from the shapes. Higher values create simpler shapes with fewer points, lower values keep more detail.")
+        simplify_layout.addWidget(simplify_label)
         
         self.simplify_slider = QSlider(Qt.Horizontal)
         self.simplify_slider.setRange(0, 200)
         self.simplify_slider.setValue(0)  # Updated default to 0
+        self.simplify_slider.setToolTip("Controls how much detail to remove from the shapes. Higher values create simpler shapes with fewer points, lower values keep more detail.")
         self.simplify_slider.valueChanged.connect(self.on_param_change)
         simplify_layout.addWidget(self.simplify_slider)
         
@@ -919,6 +980,7 @@ class ImageEmbossGUI(QMainWindow):
         
         # File selection
         self.load_button = QPushButton("Select Image")
+        self.load_button.setToolTip("Load an image file to process")
         self.load_button.clicked.connect(self.load_image)
         layout.addWidget(self.load_button)
         
@@ -944,6 +1006,7 @@ class ImageEmbossGUI(QMainWindow):
         self.export_scale_input.setRange(0.1, 10.0)
         self.export_scale_input.setValue(1.0)
         self.export_scale_input.setDecimals(2)
+        self.export_scale_input.setToolTip("Scale factor for DXF export (1.0 = original size)")
         self.export_scale_input.valueChanged.connect(self.on_export_scale_change)
         layout.addWidget(self.export_scale_input)
         
@@ -953,6 +1016,7 @@ class ImageEmbossGUI(QMainWindow):
         
         # Export button
         self.export_button = QPushButton("Export DXF")
+        self.export_button.setToolTip("Export the processed image as a DXF file")
         self.export_button.clicked.connect(self.export_dxf)
         layout.addWidget(self.export_button)
         
@@ -970,16 +1034,19 @@ class ImageEmbossGUI(QMainWindow):
         layout.addWidget(QLabel("Zoom:"))
         zoom_in_btn = QPushButton("+")
         zoom_in_btn.setMaximumSize(25, 25)
+        zoom_in_btn.setToolTip("Zoom in")
         zoom_in_btn.clicked.connect(self.zoom_in)
         layout.addWidget(zoom_in_btn)
         
         zoom_out_btn = QPushButton("-")
         zoom_out_btn.setMaximumSize(25, 25)
+        zoom_out_btn.setToolTip("Zoom out")
         zoom_out_btn.clicked.connect(self.zoom_out)
         layout.addWidget(zoom_out_btn)
         
         zoom_1_1_btn = QPushButton("1:1")
         zoom_1_1_btn.setMaximumSize(35, 25)
+        zoom_1_1_btn.setToolTip("Reset to 1:1 zoom")
         zoom_1_1_btn.clicked.connect(self.zoom_reset)
         layout.addWidget(zoom_1_1_btn)
         
@@ -989,21 +1056,25 @@ class ImageEmbossGUI(QMainWindow):
         layout.addWidget(QLabel("Pan:"))
         pan_up_btn = QPushButton("↑")
         pan_up_btn.setMaximumSize(25, 25)
+        pan_up_btn.setToolTip("Pan up")
         pan_up_btn.clicked.connect(lambda: self.pan_preview(0, -50))
         layout.addWidget(pan_up_btn)
         
         pan_down_btn = QPushButton("↓")
         pan_down_btn.setMaximumSize(25, 25)
+        pan_down_btn.setToolTip("Pan down")
         pan_down_btn.clicked.connect(lambda: self.pan_preview(0, 50))
         layout.addWidget(pan_down_btn)
         
         pan_left_btn = QPushButton("←")
         pan_left_btn.setMaximumSize(25, 25)
+        pan_left_btn.setToolTip("Pan left")
         pan_left_btn.clicked.connect(lambda: self.pan_preview(-50, 0))
         layout.addWidget(pan_left_btn)
         
         pan_right_btn = QPushButton("→")
         pan_right_btn.setMaximumSize(25, 25)
+        pan_right_btn.setToolTip("Pan right")
         pan_right_btn.clicked.connect(lambda: self.pan_preview(50, 0))
         layout.addWidget(pan_right_btn)
         
@@ -1012,34 +1083,61 @@ class ImageEmbossGUI(QMainWindow):
         # Edit controls
         layout.addWidget(QLabel("Edit:"))
         
+        # Create button group for mutually exclusive selection
+        self.edit_button_group = QButtonGroup()
+        
         # View mode button
         self.view_btn = QPushButton("👁")
         self.view_btn.setMaximumSize(25, 25)
         self.view_btn.setCheckable(True)
         self.view_btn.setChecked(True)
+        self.view_btn.setToolTip("View mode - navigate and zoom")
         self.view_btn.clicked.connect(lambda: self.set_edit_mode("view"))
+        self.edit_button_group.addButton(self.view_btn, 0)
         layout.addWidget(self.view_btn)
         
         # Paint mode button
         self.paint_btn = QPushButton("✏️")
         self.paint_btn.setMaximumSize(25, 25)
         self.paint_btn.setCheckable(True)
+        self.paint_btn.setToolTip("Paint mode - draw freehand")
         self.paint_btn.clicked.connect(lambda: self.set_edit_mode("paint"))
+        self.edit_button_group.addButton(self.paint_btn, 1)
         layout.addWidget(self.paint_btn)
         
         # Eraser mode button
         self.eraser_btn = QPushButton("🧽")
         self.eraser_btn.setMaximumSize(25, 25)
         self.eraser_btn.setCheckable(True)
+        self.eraser_btn.setToolTip("Eraser mode - erase drawings")
         self.eraser_btn.clicked.connect(lambda: self.set_edit_mode("eraser"))
+        self.edit_button_group.addButton(self.eraser_btn, 2)
         layout.addWidget(self.eraser_btn)
         
         # Line mode button
         self.line_btn = QPushButton("📏")
         self.line_btn.setMaximumSize(25, 25)
         self.line_btn.setCheckable(True)
+        self.line_btn.setToolTip("Line mode - draw straight lines")
         self.line_btn.clicked.connect(lambda: self.set_edit_mode("line"))
+        self.edit_button_group.addButton(self.line_btn, 3)
         layout.addWidget(self.line_btn)
+        
+        layout.addSpacing(10)
+        
+        # Undo/Redo controls
+        layout.addWidget(QLabel("History:"))
+        self.undo_btn = QPushButton("↶")
+        self.undo_btn.setMaximumSize(25, 25)
+        self.undo_btn.setToolTip("Undo last action")
+        self.undo_btn.clicked.connect(self.undo_action)
+        layout.addWidget(self.undo_btn)
+        
+        self.redo_btn = QPushButton("↷")
+        self.redo_btn.setMaximumSize(25, 25)
+        self.redo_btn.setToolTip("Redo last undone action")
+        self.redo_btn.clicked.connect(self.redo_action)
+        layout.addWidget(self.redo_btn)
         
         layout.addSpacing(10)
         
@@ -1048,6 +1146,7 @@ class ImageEmbossGUI(QMainWindow):
         self.shape_combo = QComboBox()
         self.shape_combo.addItems(["Rectangle", "Triangle", "Circle"])
         self.shape_combo.setMaximumWidth(80)
+        self.shape_combo.setToolTip("Select shape type for drawing")
         self.shape_combo.currentTextChanged.connect(self.set_shape_mode)
         layout.addWidget(self.shape_combo)
         
@@ -1055,7 +1154,9 @@ class ImageEmbossGUI(QMainWindow):
         self.shape_btn = QPushButton("🔺")
         self.shape_btn.setMaximumSize(25, 25)
         self.shape_btn.setCheckable(True)
+        self.shape_btn.setToolTip("Draw shapes")
         self.shape_btn.clicked.connect(lambda: self.set_edit_mode("shape"))
+        self.edit_button_group.addButton(self.shape_btn, 4)
         layout.addWidget(self.shape_btn)
         
         layout.addStretch()  # Push everything to the left
@@ -1220,6 +1321,9 @@ class ImageEmbossGUI(QMainWindow):
             
             # Update preview
             self.update_preview()
+            
+            # Fit images to view after loading
+            QTimer.singleShot(50, self.fit_images_to_view)
             
             self.status_bar.showMessage(f"Loaded: {os.path.basename(path)}")
         else:
@@ -1416,13 +1520,79 @@ class ImageEmbossGUI(QMainWindow):
         """Set the edit mode for the DXF view"""
         self.dxf_view.set_edit_mode(mode)
         self.edit_mode = mode
+        
+        # Set cursor based on mode
+        if mode == "view":
+            cursor = QCursor(Qt.ArrowCursor)
+        elif mode == "paint":
+            cursor = QCursor(Qt.CrossCursor)
+        elif mode == "eraser":
+            cursor = QCursor(Qt.CrossCursor)  # Could create custom eraser cursor
+        elif mode == "line":
+            cursor = QCursor(Qt.CrossCursor)
+        elif mode == "shape":
+            cursor = QCursor(Qt.CrossCursor)
+        else:
+            cursor = QCursor(Qt.ArrowCursor)
+        
+        # Apply cursor to both views
+        self.original_view.setCursor(cursor)
+        self.dxf_view.setCursor(cursor)
     
     def set_shape_mode(self):
         """Set shape drawing mode"""
-        shape_type = self.shape_type_combo.currentText()
+        shape_type = self.shape_combo.currentText()
         self.dxf_view.set_shape_type(shape_type)
         self.dxf_view.set_edit_mode(shape_type)
         self.edit_mode = shape_type
+    
+    def undo_action(self):
+        """Undo the last drawing action"""
+        self.dxf_view.undo_last_action()
+    
+    def redo_action(self):
+        """Redo the last undone action"""
+        self.dxf_view.redo_last_action()
+    
+    def on_gap_enabled_toggled(self, enabled):
+        """Handle gap threshold enable/disable toggle"""
+        self.gap_slider.setEnabled(enabled)
+        if not enabled:
+            self.gap_slider.setValue(0)
+            self.gap_label.setText("0.0")
+        self.on_param_change()  # Update preview
+    
+    def force_maximize(self):
+        """Force the window to maximize"""
+        # Try multiple methods to ensure maximization
+        self.setWindowState(Qt.WindowMaximized)
+        self.showMaximized()
+        
+        # Try setting geometry to screen size as backup
+        screen = QApplication.primaryScreen()
+        if screen:
+            screen_geometry = screen.availableGeometry()
+            self.setGeometry(screen_geometry)
+        
+        # Force update
+        self.update()
+        self.repaint()
+    
+    def showEvent(self, event):
+        """Handle show event to ensure maximization"""
+        super().showEvent(event)
+        if not self.isMaximized():
+            self.showMaximized()
+    
+    def fit_images_to_view(self):
+        """Fit both images to their respective views"""
+        if hasattr(self, 'original_view') and self.original_view.image_item is not None:
+            self.original_view.fitInView(self.original_view.image_item, Qt.KeepAspectRatio)
+            self.original_view.zoom_factor = 1.0
+        
+        if hasattr(self, 'dxf_view') and self.dxf_view.image_item is not None:
+            self.dxf_view.fitInView(self.dxf_view.image_item, Qt.KeepAspectRatio)
+            self.dxf_view.zoom_factor = 1.0
     
     def on_shape_type_change(self, shape_type):
         """Handle shape type change"""

@@ -678,6 +678,10 @@ class ImageEmbossGUI:
             # Line mode - show temporary line
             if self.drawing:
                 self.draw_temporary_line(event.x, event.y)
+        elif self.edit_mode == "shapes":
+            # Shape mode - show temporary shape
+            if self.drawing:
+                self.draw_temporary_shape(event.x, event.y)
         elif self.edit_mode == "eraser":
             # Eraser mode - erase along the drag path
             self.erase_along_path(event.x, event.y)
@@ -765,6 +769,36 @@ class ImageEmbossGUI:
             # Draw straight line
             self.dxf_canvas.create_line(self.line_start_x, self.line_start_y, end_x, end_y, 
                                       fill="blue", width=2, tags="temp_line")
+    
+    def draw_temporary_shape(self, x, y):
+        """Draw temporary shape while dragging"""
+        if not hasattr(self, 'shape_start_x'):
+            return
+            
+        # Clear previous temporary shape
+        self.dxf_canvas.delete("temp_shape")
+        
+        shape_type = self.shape_type_var.get()
+        
+        if shape_type == "rectangle":
+            # Draw rectangle outline
+            self.dxf_canvas.create_rectangle(self.shape_start_x, self.shape_start_y, x, y,
+                                           outline="blue", width=2, tags="temp_shape")
+        elif shape_type == "triangle":
+            # Draw triangle outline
+            if y < self.shape_start_y:  # Triangle pointing up
+                points = [self.shape_start_x, y, x, y, (self.shape_start_x + x) / 2, self.shape_start_y]
+            else:  # Triangle pointing down
+                points = [self.shape_start_x, self.shape_start_y, x, self.shape_start_y, (self.shape_start_x + x) / 2, y]
+            self.dxf_canvas.create_polygon(points, outline="blue", width=2, fill="", tags="temp_shape")
+        elif shape_type == "circle":
+            # Draw circle outline
+            center_x = (self.shape_start_x + x) / 2
+            center_y = (self.shape_start_y + y) / 2
+            radius = max(abs(x - self.shape_start_x), abs(y - self.shape_start_y)) / 2
+            self.dxf_canvas.create_oval(center_x - radius, center_y - radius, 
+                                      center_x + radius, center_y + radius,
+                                      outline="blue", width=2, tags="temp_shape")
             
     def finish_paint_stroke(self):
         """Finish a paint stroke and add it to contours"""
@@ -993,6 +1027,7 @@ class ImageEmbossGUI:
             self.redraw_preview()
             
         self.drawing = False
+        self.dxf_canvas.delete("temp_shape")
             
     def setup_loading_overlay(self):
         """Setup loading overlay for processing feedback"""

@@ -186,6 +186,9 @@ class GUIMethods:
             background_item.setOpacity(1.0 - transparency)  # 0% slider = opaque, 100% slider = transparent
             
             self.dxf_view.scene.addItem(background_item)
+            
+            # Set this as the image_item for coordinate transformation
+            self.dxf_view.image_item = background_item
         
         # No need for white background - we want the original image to show through
         
@@ -583,68 +586,76 @@ class GUIMethods:
             print("DEBUG: No original image, returning")
             return
         
+        print("DEBUG: Original image exists")
         h, w = self.original_image.shape[:2]
+        print(f"DEBUG: Image dimensions: {w}x{h}")
         
         # Transform scene coordinates to image coordinates
         if self.dxf_view.image_item:
+            print("DEBUG: Image item exists, proceeding with coordinate transformation")
             image_rect = self.dxf_view.image_item.boundingRect()
+            print(f"DEBUG: Image rect: {image_rect}")
             x = int((scene_point.x() / image_rect.width()) * w)
             y = int((scene_point.y() / image_rect.height()) * h)
             
             # Clamp to image bounds
             x = max(0, min(x, w - 1))
             y = max(0, min(y, h - 1))
+            print(f"DEBUG: Transformed coordinates: ({x}, {y})")
+        else:
+            print("DEBUG: No image item found, returning")
+            return
+        
+        # Extract a rectangular region around the point
+        x1 = max(0, x - radius)
+        y1 = max(0, y - radius)
+        x2 = min(w, x + radius)
+        y2 = min(h, y + radius)
+        
+        # Extract the rectangular area from the original image
+        roi = self.original_image[y1:y2, x1:x2]
+        print(f"DEBUG: ROI extracted: shape {roi.shape}, region ({x1},{y1}) to ({x2},{y2})")
+        
+        # Process this area for edges using the same parameters
+        edges = find_edges_and_contours(roi, self.params)
+        print(f"DEBUG: Edge processing result shape: {edges.shape}, non-zero pixels: {np.count_nonzero(edges)}")
+        
+        # Find contours in this area
+        area_contours = contours_from_mask(
+            edges,
+            self.params["largest_n"],
+            self.params["simplify_pct"],
+            self.params["gap_threshold"]
+        )
+        print(f"DEBUG: Found {len(area_contours)} contours in processed area")
+        
+        # Adjust contours back to full image coordinates
+        adjusted_contours = []
+        for contour in area_contours:
+            # Offset the contour coordinates back to the full image
+            adjusted_contour = contour.copy()
+            adjusted_contour[:, :, 0] += x1  # Add x offset
+            adjusted_contour[:, :, 1] += y1  # Add y offset
+            adjusted_contours.append(adjusted_contour)
+        
+        # Filter out tiny contours (artifacts)
+        filtered_contours = []
+        for contour in adjusted_contours:
+            area = cv2.contourArea(contour)
+            if area > 50:  # Only keep contours with area > 50 pixels
+                filtered_contours.append(contour)
+        
+        # Add new contours to existing ones
+        if filtered_contours:
+            self.current_contours.extend(filtered_contours)
             
-            # Extract a rectangular region around the point
-            x1 = max(0, x - radius)
-            y1 = max(0, y - radius)
-            x2 = min(w, x + radius)
-            y2 = min(h, y + radius)
+            # Refresh the preview
+            self.display_dxf_preview()
             
-            # Extract the rectangular area from the original image
-            roi = self.original_image[y1:y2, x1:x2]
-            print(f"DEBUG: ROI extracted: shape {roi.shape}, region ({x1},{y1}) to ({x2},{y2})")
-            
-            # Process this area for edges using the same parameters
-            edges = find_edges_and_contours(roi, self.params)
-            print(f"DEBUG: Edge processing result shape: {edges.shape}, non-zero pixels: {np.count_nonzero(edges)}")
-            
-            # Find contours in this area
-            area_contours = contours_from_mask(
-                edges,
-                self.params["largest_n"],
-                self.params["simplify_pct"],
-                self.params["gap_threshold"]
-            )
-            print(f"DEBUG: Found {len(area_contours)} contours in processed area")
-            
-            # Adjust contours back to full image coordinates
-            adjusted_contours = []
-            for contour in area_contours:
-                # Offset the contour coordinates back to the full image
-                adjusted_contour = contour.copy()
-                adjusted_contour[:, :, 0] += x1  # Add x offset
-                adjusted_contour[:, :, 1] += y1  # Add y offset
-                adjusted_contours.append(adjusted_contour)
-            
-            # Filter out tiny contours (artifacts)
-            filtered_contours = []
-            for contour in adjusted_contours:
-                area = cv2.contourArea(contour)
-                if area > 50:  # Only keep contours with area > 50 pixels
-                    filtered_contours.append(contour)
-            
-            # Add new contours to existing ones
-            if filtered_contours:
-                self.current_contours.extend(filtered_contours)
-                
-                # Refresh the preview
-                self.display_dxf_preview()
-                
-                # Show status message
-                self.status_bar.showMessage(f"Added {len(filtered_contours)} new contours from area processing")
-            else:
-                self.status_bar.showMessage("No significant edges found in the selected area")
+            # Show status message
+            self.status_bar.showMessage(f"Added {len(filtered_contours)} new contours from area processing")
+        else:
+            self.status_bar.showMessage("No significant edges found in the selected area")
 
     def convert_drawing_items_to_contours(self):
         """Convert drawing items to contours for DXF export"""

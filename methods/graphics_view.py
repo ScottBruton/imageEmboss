@@ -87,6 +87,7 @@ class ImageGraphicsView(QGraphicsView):
         
         # Area processing radius
         self.area_process_radius = 50
+        self.area_process_circle = None  # Visual indicator circle
         
         # Shape drawing variables
         self.shape_start_point = QPointF()
@@ -174,6 +175,10 @@ class ImageGraphicsView(QGraphicsView):
             elif self.edit_mode == "area_process":
                 print(f"DEBUG: Area process clicked at {scene_point}")
                 print(f"DEBUG: Emitting signal with radius {self.area_process_radius}")
+                
+                # Show the processing circle
+                self.show_area_process_circle(scene_point)
+                
                 # Process area for edge detection
                 self.area_process_requested.emit(scene_point, self.area_process_radius)
                 print("DEBUG: Signal emitted")
@@ -293,6 +298,9 @@ class ImageGraphicsView(QGraphicsView):
             # Use a brush cursor for edge drawing mode
             self.setCursor(Qt.CrossCursor)
             self.setDragMode(QGraphicsView.NoDrag)
+        else:
+            # Hide the area process circle when switching to other modes
+            self.hide_area_process_circle()
     
     def set_shape_type(self, shape_type):
         """Set the shape type for shape drawing"""
@@ -301,6 +309,33 @@ class ImageGraphicsView(QGraphicsView):
     def set_area_process_radius(self, radius):
         """Set the radius for area processing"""
         self.area_process_radius = radius
+    
+    def show_area_process_circle(self, center_point):
+        """Show a circle indicating the area processing radius"""
+        if self.area_process_circle:
+            self.scene.removeItem(self.area_process_circle)
+        
+        # Create a circle to show the processing area
+        circle = QGraphicsEllipseItem(
+            center_point.x() - self.area_process_radius,
+            center_point.y() - self.area_process_radius,
+            self.area_process_radius * 2,
+            self.area_process_radius * 2
+        )
+        
+        # Style the circle
+        pen = QPen(QColor(255, 0, 0), 2, Qt.DashLine)  # Red dashed line
+        circle.setPen(pen)
+        circle.setZValue(10)  # Above everything else
+        
+        self.scene.addItem(circle)
+        self.area_process_circle = circle
+    
+    def hide_area_process_circle(self):
+        """Hide the area processing circle"""
+        if self.area_process_circle:
+            self.scene.removeItem(self.area_process_circle)
+            self.area_process_circle = None
     
     def start_drawing(self, point):
         """Start drawing operation"""

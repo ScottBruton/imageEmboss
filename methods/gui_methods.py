@@ -581,29 +581,21 @@ class GUIMethods:
     
     def process_area_for_edges(self, scene_point, radius):
         """Process a circular area for edge detection and add new contours"""
-        print(f"DEBUG: process_area_for_edges called with point {scene_point}, radius {radius}")
         if self.original_image is None:
-            print("DEBUG: No original image, returning")
             return
         
-        print("DEBUG: Original image exists")
         h, w = self.original_image.shape[:2]
-        print(f"DEBUG: Image dimensions: {w}x{h}")
         
         # Transform scene coordinates to image coordinates
         if self.dxf_view.image_item:
-            print("DEBUG: Image item exists, proceeding with coordinate transformation")
             image_rect = self.dxf_view.image_item.boundingRect()
-            print(f"DEBUG: Image rect: {image_rect}")
             x = int((scene_point.x() / image_rect.width()) * w)
             y = int((scene_point.y() / image_rect.height()) * h)
             
             # Clamp to image bounds
             x = max(0, min(x, w - 1))
             y = max(0, min(y, h - 1))
-            print(f"DEBUG: Transformed coordinates: ({x}, {y})")
         else:
-            print("DEBUG: No image item found, returning")
             return
         
         # Extract a rectangular region around the point
@@ -614,11 +606,9 @@ class GUIMethods:
         
         # Extract the rectangular area from the original image
         roi = self.original_image[y1:y2, x1:x2]
-        print(f"DEBUG: ROI extracted: shape {roi.shape}, region ({x1},{y1}) to ({x2},{y2})")
         
         # Process this area for edges using the same parameters
         edges = find_edges_and_contours(roi, self.params)
-        print(f"DEBUG: Edge processing result shape: {edges.shape}, non-zero pixels: {np.count_nonzero(edges)}")
         
         # Find contours in this area
         area_contours = contours_from_mask(
@@ -627,7 +617,6 @@ class GUIMethods:
             self.params["simplify_pct"],
             self.params["gap_threshold"]
         )
-        print(f"DEBUG: Found {len(area_contours)} contours in processed area")
         
         # Adjust contours back to full image coordinates
         adjusted_contours = []

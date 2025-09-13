@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 import math
 from PySide6.QtWidgets import QMessageBox, QFileDialog, QApplication, QGraphicsPixmapItem
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QPointF
 from PySide6.QtGui import QPixmap, QImage, QPainter, QPen, QColor, QPainterPath, QPolygonF, QCursor, QTransform
 
 from .helpers import find_edges_and_contours, contours_from_mask, export_dxf
@@ -184,22 +184,54 @@ class GUIMethods:
                     points.append([point[0][0], point[0][1]])
             
             if len(points) >= 3:
+                # Calculate contour area
+                area = cv2.contourArea(contour)
+                
+                # Since we're using RETR_EXTERNAL, all contours should be closed
+                # Let's fill all contours with positive area
+                is_closed = area > 0
+                
+                print(f"DEBUG: Contour {i} - Area: {area:.2f}, Points: {len(points)}, Is closed: {is_closed}")
+                
                 # Create a path for the contour
                 path = QPainterPath()
                 path.moveTo(points[0][0], points[0][1])
                 for point in points[1:]:
                     path.lineTo(point[0], point[1])
-                path.closeSubpath()
+                
+                # Always close the path for filled contours
+                if is_closed:
+                    path.closeSubpath()
+                    print(f"DEBUG: Closed path for contour {i}")
                 
                 # Create graphics item with solid line
-                area = cv2.contourArea(contour)
                 color = QColor(0, 100, 0) if area > 100 else QColor(255, 0, 0)
                 pen = QPen(color, 2, Qt.SolidLine)
                 
-                from PySide6.QtWidgets import QGraphicsPathItem
-                path_item = QGraphicsPathItem(path)
-                path_item.setPen(pen)
-                self.dxf_view.scene.addItem(path_item)
+                if is_closed:
+                    # Use QGraphicsPolygonItem for filled contours
+                    from PySide6.QtWidgets import QGraphicsPolygonItem
+                    
+                    # Create polygon from points
+                    polygon = QPolygonF()
+                    for point in points:
+                        polygon.append(QPointF(point[0], point[1]))
+                    
+                    polygon_item = QGraphicsPolygonItem(polygon)
+                    polygon_item.setPen(pen)
+                    
+                    # Add transparent light green fill
+                    light_green = QColor(0, 255, 0, 150)  # Bright green with more opacity
+                    polygon_item.setBrush(light_green)
+                    print(f"DEBUG: Applied bright green fill to contour {i} using polygon")
+                    
+                    self.dxf_view.scene.addItem(polygon_item)
+                else:
+                    # Use QGraphicsPathItem for non-filled contours
+                    from PySide6.QtWidgets import QGraphicsPathItem
+                    path_item = QGraphicsPathItem(path)
+                    path_item.setPen(pen)
+                    self.dxf_view.scene.addItem(path_item)
         
         # Draw edited contours (manually added)
         for contour in self.edited_contours:

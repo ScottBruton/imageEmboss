@@ -5,9 +5,9 @@ import math
 from PySide6.QtWidgets import (QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, 
                                QGraphicsPathItem, QGraphicsLineItem, QGraphicsRectItem,
                                QGraphicsEllipseItem, QGraphicsPolygonItem)
-from PySide6.QtCore import Qt, QPoint, QPointF, QRectF, QLineF, Signal, QMimeData
+from PySide6.QtCore import Qt, QPoint, QPointF, QRectF, QLineF, Signal, QMimeData, QDateTime
 from PySide6.QtGui import (QPainter, QPen, QColor, QImage, QPixmap, QPainterPath, 
-                          QDragEnterEvent, QDropEvent, QPolygonF)
+                          QDragEnterEvent, QDropEvent, QPolygonF, QTransform)
 
 from .graphics_items import (DrawingPathItem, DrawingLineItem, DrawingRectItem, 
                            DrawingEllipseItem, DrawingPolygonItem)
@@ -68,6 +68,10 @@ class ImageGraphicsView(QGraphicsView):
         self.drawing_points = []
         self.current_drawing_item = None
         self.temp_drawing_item = None
+        
+        # Undo/Redo system
+        self.undo_stack = []  # List of actions that can be undone
+        self.redo_stack = []  # List of actions that can be redone
         
         # Drawing pen settings
         self.drawing_pen = QPen(QColor(0, 0, 255), 2, Qt.SolidLine)  # Blue pen
@@ -197,10 +201,11 @@ class ImageGraphicsView(QGraphicsView):
         super().mouseReleaseEvent(event)
     
     def reset_view(self):
-        """Reset zoom and pan"""
-        self.zoom_factor = 1.0
+        """Reset zoom and pan to fit view (1:1 fit)"""
+        # Fit the image to view (this is what 1:1 should mean - fit to container)
         if self.image_item:
             self.fitInView(self.image_item, Qt.KeepAspectRatio)
+            self.zoom_factor = 1.0
     
     def set_edit_mode(self, mode):
         """Set the current edit mode"""
@@ -279,6 +284,8 @@ class ImageGraphicsView(QGraphicsView):
                 # Create final path item for the paint stroke
                 path_item = DrawingPathItem(self.drawing_path, self.drawing_pen)
                 self.scene.addItem(path_item)
+                # Add to undo stack
+                self.add_to_undo_stack(path_item, "add")
         elif self.edit_mode == "line":
             self.finish_line(point)
         elif self.edit_mode in ["rectangle", "triangle", "circle"]:
@@ -290,6 +297,114 @@ class ImageGraphicsView(QGraphicsView):
         self.temp_drawing_item = None
         
         self.drawing_finished.emit(point)
+    
+    def add_to_undo_stack(self, item, action_type="add"):
+        """Add an action to the undo stack"""
+        self.undo_stack.append({
+            'item': item,
+            'action': action_type,
+            'timestamp': QDateTime.currentDateTime()
+        })
+        # Clear redo stack when new action is added
+        self.redo_stack.clear()
+        print(f"DEBUG: Added to undo stack - action: {action_type}, undo_stack size: {len(self.undo_stack)}, redo_stack size: {len(self.redo_stack)}")
+    
+    def undo_last_action(self):
+        """Undo the last action"""
+        if not self.undo_stack:
+            print("DEBUG: undo_last_action - no actions to undo")
+            return False
+        
+        action = self.undo_stack.pop()
+        item = action['item']
+        action_type = action['action']
+        
+        print(f"DEBUG: undo_last_action - action: {action_type}, undo_stack size: {len(self.undo_stack)}")
+        
+        if action_type == "add":
+            # Remove the item from scene and add to redo stack as "add" (so redo will add it back)
+            if item.scene() == self.scene:
+                self.scene.removeItem(item)
+                print("DEBUG: undo_last_action - removed item from scene")
+            self.redo_stack.append({
+                'item': item,
+                'action': 'add',  # Keep as "add" so redo will add it back
+                'timestamp': action['timestamp']
+            })
+            print(f"DEBUG: undo_last_action - added to redo stack, redo_stack size: {len(self.redo_stack)}")
+        elif action_type == "remove":
+            # Add the item back to scene and add to redo stack as "remove" (so redo will remove it again)
+            if item.scene() is None:
+                self.scene.addItem(item)
+                print("DEBUG: undo_last_action - added item back to scene")
+            self.redo_stack.append({
+                'item': item,
+                'action': 'remove',  # Keep as "remove" so redo will remove it again
+                'timestamp': action['timestamp']
+            })
+            print(f"DEBUG: undo_last_action - added to redo stack, redo_stack size: {len(self.redo_stack)}")
+        
+        return True
+    
+    def can_undo(self):
+        """Check if there are actions to undo"""
+        return len(self.undo_stack) > 0
+    
+    def can_redo(self):
+        """Check if there are actions to redo"""
+        return len(self.redo_stack) > 0
+    
+    def is_at_clean_state(self):
+        """Check if we're at the clean state (only preview image, no edits)"""
+        # Count non-image items in the scene
+        non_image_items = 0
+        for item in self.scene.items():
+            if not isinstance(item, QGraphicsPixmapItem):
+                non_image_items += 1
+        return non_image_items == 0
+    
+    def redo_last_action(self):
+        """Redo the last undone action"""
+        if not self.redo_stack:
+            print("DEBUG: redo_last_action - no actions to redo")
+            return False
+        
+        action = self.redo_stack.pop()
+        item = action['item']
+        action_type = action['action']
+        
+        print(f"DEBUG: redo_last_action - action: {action_type}, redo_stack size: {len(self.redo_stack)}")
+        
+        if action_type == "add":
+            # Add the item back to scene and add to undo stack as "add" (so undo will remove it)
+            if item.scene() is None:
+                self.scene.addItem(item)
+                print("DEBUG: redo_last_action - added item back to scene")
+            self.undo_stack.append({
+                'item': item,
+                'action': 'add',  # Keep as "add" so undo will remove it
+                'timestamp': action['timestamp']
+            })
+            print(f"DEBUG: redo_last_action - added to undo stack, undo_stack size: {len(self.undo_stack)}")
+        elif action_type == "remove":
+            # Remove the item from scene and add to undo stack as "remove" (so undo will add it back)
+            if item.scene() == self.scene:
+                self.scene.removeItem(item)
+                print("DEBUG: redo_last_action - removed item from scene")
+            self.undo_stack.append({
+                'item': item,
+                'action': 'remove',  # Keep as "remove" so undo will add it back
+                'timestamp': action['timestamp']
+            })
+            print(f"DEBUG: redo_last_action - added to undo stack, undo_stack size: {len(self.undo_stack)}")
+        
+        return True
+    
+    def clear_undo_redo_stacks(self):
+        """Clear both undo and redo stacks"""
+        print(f"DEBUG: clear_undo_redo_stacks - clearing stacks, undo: {len(self.undo_stack)}, redo: {len(self.redo_stack)}")
+        self.undo_stack.clear()
+        self.redo_stack.clear()
     
     def update_temp_paint(self):
         """Update temporary paint stroke while drawing"""
@@ -321,6 +436,8 @@ class ImageGraphicsView(QGraphicsView):
         line = QLineF(self.shape_start_point, end_point)
         line_item = DrawingLineItem(line, self.drawing_pen)
         self.scene.addItem(line_item)
+        # Add to undo stack
+        self.add_to_undo_stack(line_item, "add")
     
     def update_temp_shape(self, end_point):
         """Update temporary shape while drawing"""
@@ -385,6 +502,8 @@ class ImageGraphicsView(QGraphicsView):
             shape_item = DrawingPolygonItem(polygon, self.drawing_pen)
         
         self.scene.addItem(shape_item)
+        # Add to undo stack
+        self.add_to_undo_stack(shape_item, "add")
     
     def erase_at_point(self, point):
         """Erase items at the given point"""

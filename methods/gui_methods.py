@@ -5,9 +5,9 @@ import os
 import cv2
 import numpy as np
 import math
-from PySide6.QtWidgets import QMessageBox, QFileDialog, QApplication
+from PySide6.QtWidgets import QMessageBox, QFileDialog, QApplication, QGraphicsPixmapItem
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QPixmap, QImage, QPainter, QPen, QColor, QPainterPath, QPolygonF, QCursor
+from PySide6.QtGui import QPixmap, QImage, QPainter, QPen, QColor, QPainterPath, QPolygonF, QCursor, QTransform
 
 from .helpers import find_edges_and_contours, contours_from_mask, export_dxf
 from .graphics_items import (DrawingPathItem, DrawingLineItem, DrawingRectItem, 
@@ -62,6 +62,9 @@ class GUIMethods:
         """Load image from a given path"""
         self.image_path = path
         self.original_image = cv2.imread(path, cv2.IMREAD_COLOR)
+        
+        # Clear undo/redo stacks when loading new image
+        self.dxf_view.clear_undo_redo_stacks()
         
         if self.original_image is not None:
             # Reset edit state for new image
@@ -419,13 +422,54 @@ class GUIMethods:
     
     def undo_action(self):
         """Undo the last drawing action"""
-        # Implementation needed
-        pass
+        print(f"DEBUG: undo_action called - can_undo: {self.dxf_view.can_undo()}")
+        if self.dxf_view.can_undo():
+            self.dxf_view.undo_last_action()
+            self.status_bar.showMessage("Action undone")
+        else:
+            self.status_bar.showMessage("Nothing to undo")
     
     def redo_action(self):
         """Redo the last undone action"""
-        # Implementation needed
-        pass
+        print(f"DEBUG: redo_action called - can_redo: {self.dxf_view.can_redo()}")
+        if self.dxf_view.can_redo():
+            self.dxf_view.redo_last_action()
+            self.status_bar.showMessage("Action redone")
+        else:
+            self.status_bar.showMessage("Nothing to redo")
+    
+    def reset_edits(self):
+        """Reset all edits and revert to original preview"""
+        print(f"DEBUG: reset_edits called - undo_stack size: {len(self.dxf_view.undo_stack)}, redo_stack size: {len(self.dxf_view.redo_stack)}")
+        
+        # Undo all actions in the undo stack to get back to the beginning
+        undo_count = 0
+        while self.dxf_view.can_undo():
+            self.dxf_view.undo_last_action()
+            undo_count += 1
+        
+        print(f"DEBUG: reset_edits - undone {undo_count} actions")
+        
+        # Clear both stacks completely
+        self.dxf_view.clear_undo_redo_stacks()
+        
+        # Reset edit state
+        self.edited_contours = []
+        self.erased_contours = set()
+        self.erased_points = set()
+        self.edit_mode = "view"
+        
+        # Reset view to fit the preview in the container (1:1 fit)
+        if self.dxf_view.image_item is not None:
+            # Fit the image to view (this is what 1:1 should mean - fit to container)
+            self.dxf_view.fitInView(self.dxf_view.image_item, Qt.KeepAspectRatio)
+            self.dxf_view.zoom_factor = 1.0
+        
+        # Update status
+        if undo_count > 0:
+            self.status_bar.showMessage(f"Reset complete - {undo_count} actions undone")
+        else:
+            self.status_bar.showMessage("Already at clean state - no edits to reset")
     
     def on_gap_enabled_toggled(self, enabled):
         """Handle gap threshold enable/disable toggle"""

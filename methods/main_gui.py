@@ -697,6 +697,12 @@ class ImageEmbossGUI(QMainWindow, GUIMethods):
         self.redo_btn.clicked.connect(self.redo_action)
         layout.addWidget(self.redo_btn)
         
+        self.reset_btn = QPushButton("🔄")
+        self.reset_btn.setMaximumSize(25, 25)
+        self.reset_btn.setToolTip("Reset all edits and view")
+        self.reset_btn.clicked.connect(self.reset_edits)
+        layout.addWidget(self.reset_btn)
+        
         layout.addSpacing(10)
         
         # Shape controls

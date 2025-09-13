@@ -634,9 +634,10 @@ class GUIMethods:
             if area > 50:  # Only keep contours with area > 50 pixels
                 filtered_contours.append(contour)
         
-        # Add new contours to existing ones
+        # Add new contours to existing ones with intersection handling
         if filtered_contours:
-            self.current_contours.extend(filtered_contours)
+            # Check for intersections and break up existing contours
+            self.current_contours = self.handle_contour_intersections(self.current_contours, filtered_contours)
             
             # Refresh the preview
             self.display_dxf_preview()
@@ -645,6 +646,85 @@ class GUIMethods:
             self.status_bar.showMessage(f"Added {len(filtered_contours)} new contours from area processing")
         else:
             self.status_bar.showMessage("No significant edges found in the selected area")
+
+    def handle_contour_intersections(self, existing_contours, new_contours):
+        """Handle intersections between existing and new contours"""
+        result_contours = []
+        
+        for existing_contour in existing_contours:
+            # Check if any new contour intersects with this existing contour
+            intersects = False
+            for new_contour in new_contours:
+                if self.contours_intersect(existing_contour, new_contour):
+                    intersects = True
+                    break
+            
+            if intersects:
+                # Break up the existing contour by subtracting new contours
+                broken_contours = self.break_contour_with_new(existing_contour, new_contours)
+                result_contours.extend(broken_contours)
+            else:
+                # Keep the existing contour as is
+                result_contours.append(existing_contour)
+        
+        # Add all new contours
+        result_contours.extend(new_contours)
+        
+        return result_contours
+
+    def contours_intersect(self, contour1, contour2):
+        """Check if two contours intersect"""
+        # Create bounding rectangles for quick intersection check
+        rect1 = cv2.boundingRect(contour1)
+        rect2 = cv2.boundingRect(contour2)
+        
+        # Check if bounding rectangles intersect
+        x1, y1, w1, h1 = rect1
+        x2, y2, w2, h2 = rect2
+        
+        if (x1 < x2 + w2 and x1 + w1 > x2 and y1 < y2 + h2 and y1 + h1 > y2):
+            # Bounding rectangles intersect, do more detailed check
+            # Create masks for both contours
+            h, w = self.original_image.shape[:2]
+            mask1 = np.zeros((h, w), dtype=np.uint8)
+            mask2 = np.zeros((h, w), dtype=np.uint8)
+            
+            cv2.fillPoly(mask1, [contour1], 255)
+            cv2.fillPoly(mask2, [contour2], 255)
+            
+            # Check if masks overlap
+            intersection = cv2.bitwise_and(mask1, mask2)
+            return np.any(intersection > 0)
+        
+        return False
+
+    def break_contour_with_new(self, existing_contour, new_contours):
+        """Break up an existing contour by subtracting new contours"""
+        h, w = self.original_image.shape[:2]
+        
+        # Create mask for existing contour
+        existing_mask = np.zeros((h, w), dtype=np.uint8)
+        cv2.fillPoly(existing_mask, [existing_contour], 255)
+        
+        # Create mask for new contours
+        new_mask = np.zeros((h, w), dtype=np.uint8)
+        for new_contour in new_contours:
+            cv2.fillPoly(new_mask, [new_contour], 255)
+        
+        # Subtract new contours from existing contour
+        result_mask = cv2.bitwise_and(existing_mask, cv2.bitwise_not(new_mask))
+        
+        # Find remaining contours
+        remaining_contours, _ = cv2.findContours(result_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        # Filter out tiny contours
+        filtered_remaining = []
+        for contour in remaining_contours:
+            area = cv2.contourArea(contour)
+            if area > 50:  # Only keep significant remaining pieces
+                filtered_remaining.append(contour)
+        
+        return filtered_remaining
 
     def convert_drawing_items_to_contours(self):
         """Convert drawing items to contours for DXF export"""

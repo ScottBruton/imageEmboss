@@ -212,6 +212,9 @@ class ImageGraphicsView(QGraphicsView):
             self.verticalScrollBar().setValue(
                 self.verticalScrollBar().value() - delta.y())
             self.pan_start = event.position().toPoint()
+        elif self.edit_mode == "area_process":
+            # Update the radius circle position
+            self.show_area_process_circle(scene_point)
         elif self.drawing:
             # Update drawing
             self.update_drawing(scene_point)
@@ -294,6 +297,10 @@ class ImageGraphicsView(QGraphicsView):
             self.setCursor(cursor)
             self.setDragMode(QGraphicsView.NoDrag)
             print("DEBUG: Circle cursor set")
+            
+            # Show the radius circle at the center of the view
+            center = self.mapToScene(self.viewport().rect().center())
+            self.show_area_process_circle(center)
         elif mode == "edge_draw":
             # Use a brush cursor for edge drawing mode
             self.setCursor(Qt.CrossCursor)

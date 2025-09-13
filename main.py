@@ -1,6 +1,6 @@
 """
 ImageEmboss - Image to DXF Converter
-Main application entry point using extracted modules
+Main application entry point
 """
 import sys
 from PySide6.QtWidgets import QApplication

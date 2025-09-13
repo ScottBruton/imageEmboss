@@ -191,7 +191,6 @@ class GUIMethods:
                 # Let's fill all contours with positive area
                 is_closed = area > 0
                 
-                print(f"DEBUG: Contour {i} - Area: {area:.2f}, Points: {len(points)}, Is closed: {is_closed}")
                 
                 # Create a path for the contour
                 path = QPainterPath()
@@ -202,7 +201,6 @@ class GUIMethods:
                 # Always close the path for filled contours
                 if is_closed:
                     path.closeSubpath()
-                    print(f"DEBUG: Closed path for contour {i}")
                 
                 # Create graphics item with solid line
                 color = QColor(0, 100, 0) if area > 100 else QColor(255, 0, 0)
@@ -221,9 +219,8 @@ class GUIMethods:
                     polygon_item.setPen(pen)
                     
                     # Add transparent light green fill
-                    light_green = QColor(0, 255, 0, 150)  # Bright green with more opacity
+                    light_green = QColor(144, 238, 144, 80)  # Light green with transparency
                     polygon_item.setBrush(light_green)
-                    print(f"DEBUG: Applied bright green fill to contour {i} using polygon")
                     
                     self.dxf_view.scene.addItem(polygon_item)
                 else:

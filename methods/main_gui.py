@@ -713,7 +713,7 @@ class ImageEmbossGUI(QMainWindow, GUIMethods):
         self.shape_btn.setMaximumSize(25, 25)
         self.shape_btn.setCheckable(True)
         self.shape_btn.setToolTip("Draw shapes")
-        self.shape_btn.clicked.connect(lambda: self.set_edit_mode("shape"))
+        self.shape_btn.clicked.connect(lambda: self.set_edit_mode("shapes"))
         self.edit_button_group.addButton(self.shape_btn, 4)
         layout.addWidget(self.shape_btn)
         

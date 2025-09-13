@@ -106,31 +106,22 @@ class ImageGraphicsView(QGraphicsView):
     
     def scale(self, sx, sy):
         """Override scale to remove zoom limits"""
-        print(f"DEBUG: scale() called with sx={sx}, sy={sy}")
-        
         # Get current transformation matrix
         matrix = self.transform()
-        print(f"DEBUG: Current matrix scale: {matrix.m11()}, {matrix.m22()}")
         
         # Apply scaling to the matrix
         matrix.scale(sx, sy)
-        print(f"DEBUG: New matrix scale: {matrix.m11()}, {matrix.m22()}")
         
         # Set the new transformation matrix (this bypasses any built-in limits)
         self.setTransform(matrix)
-        print(f"DEBUG: Transform set successfully")
         
         # Force update the zoom factor to match the actual matrix
         self.zoom_factor = matrix.m11()
-        print(f"DEBUG: Updated zoom_factor to: {self.zoom_factor}")
     
     def wheelEvent(self, event):
         """Handle mouse wheel zoom with unlimited zoom"""
-        print(f"DEBUG: wheelEvent called, angleDelta: {event.angleDelta().y()}")
-        
         # Get the position of the mouse before zooming
         old_pos = self.mapToScene(event.position().toPoint())
-        print(f"DEBUG: Old mouse position: {old_pos}")
         
         # Zoom
         zoom_in_factor = 1.15
@@ -138,23 +129,18 @@ class ImageGraphicsView(QGraphicsView):
         
         if event.angleDelta().y() > 0:
             zoom_factor = zoom_in_factor
-            print(f"DEBUG: Zooming IN with factor: {zoom_factor}")
         else:
             zoom_factor = zoom_out_factor
-            print(f"DEBUG: Zooming OUT with factor: {zoom_factor}")
             
         # Apply zoom without limits
         self.scale(zoom_factor, zoom_factor)
         self.zoom_factor *= zoom_factor
-        print(f"DEBUG: New zoom_factor: {self.zoom_factor}")
         
         # Get the new position
         new_pos = self.mapToScene(event.position().toPoint())
-        print(f"DEBUG: New mouse position: {new_pos}")
         
         # Move scene to old position to keep cursor position stable
         delta = new_pos - old_pos
-        print(f"DEBUG: Delta to translate: {delta}")
         self.translate(delta.x(), delta.y())
         
         event.accept()
@@ -226,15 +212,19 @@ class ImageGraphicsView(QGraphicsView):
             self.setCursor(Qt.ArrowCursor)
             self.setDragMode(QGraphicsView.RubberBandDrag)
         elif mode == "paint":
+            # Use a pencil-like cursor for paint mode
             self.setCursor(Qt.CrossCursor)
             self.setDragMode(QGraphicsView.NoDrag)
         elif mode == "line":
+            # Use cross cursor for line mode
             self.setCursor(Qt.CrossCursor)
             self.setDragMode(QGraphicsView.NoDrag)
         elif mode == "eraser":
+            # Use cross cursor for eraser mode
             self.setCursor(Qt.CrossCursor)
             self.setDragMode(QGraphicsView.NoDrag)
         elif mode in ["rectangle", "triangle", "circle"]:
+            # Use cross cursor for shape modes
             self.setCursor(Qt.CrossCursor)
             self.setDragMode(QGraphicsView.NoDrag)
     
@@ -265,6 +255,9 @@ class ImageGraphicsView(QGraphicsView):
         if self.edit_mode == "paint":
             self.drawing_path.lineTo(point)
             self.drawing_points.append(point)
+            
+            # Update temporary paint stroke
+            self.update_temp_paint()
         elif self.edit_mode == "line":
             self.update_temp_line(point)
         elif self.edit_mode in ["rectangle", "triangle", "circle"]:
@@ -279,7 +272,11 @@ class ImageGraphicsView(QGraphicsView):
         
         if self.edit_mode == "paint":
             if len(self.drawing_points) >= 2:
-                # Create a path item for the paint stroke
+                # Remove temporary paint stroke
+                if self.temp_drawing_item:
+                    self.scene.removeItem(self.temp_drawing_item)
+                
+                # Create final path item for the paint stroke
                 path_item = DrawingPathItem(self.drawing_path, self.drawing_pen)
                 self.scene.addItem(path_item)
         elif self.edit_mode == "line":
@@ -293,6 +290,17 @@ class ImageGraphicsView(QGraphicsView):
         self.temp_drawing_item = None
         
         self.drawing_finished.emit(point)
+    
+    def update_temp_paint(self):
+        """Update temporary paint stroke while drawing"""
+        # Remove previous temporary paint stroke
+        if self.temp_drawing_item:
+            self.scene.removeItem(self.temp_drawing_item)
+        
+        # Create new temporary paint stroke
+        if len(self.drawing_points) >= 2:
+            self.temp_drawing_item = DrawingPathItem(self.drawing_path, self.drawing_pen)
+            self.scene.addItem(self.temp_drawing_item)
     
     def update_temp_line(self, end_point):
         """Update temporary line while drawing"""
@@ -321,13 +329,13 @@ class ImageGraphicsView(QGraphicsView):
             self.scene.removeItem(self.temp_drawing_item)
         
         # Create new temporary shape based on type
-        if self.shape_type == "rectangle":
+        if self.edit_mode == "rectangle":
             rect = QRectF(self.shape_start_point, end_point).normalized()
             self.temp_drawing_item = DrawingRectItem(rect, self.drawing_pen)
-        elif self.shape_type == "circle":
+        elif self.edit_mode == "circle":
             rect = QRectF(self.shape_start_point, end_point).normalized()
             self.temp_drawing_item = DrawingEllipseItem(rect, self.drawing_pen)
-        elif self.shape_type == "triangle":
+        elif self.edit_mode == "triangle":
             # Create triangle points
             if end_point.y() < self.shape_start_point.y():  # Triangle pointing up
                 points = [
@@ -353,13 +361,13 @@ class ImageGraphicsView(QGraphicsView):
             self.scene.removeItem(self.temp_drawing_item)
         
         # Create final shape item
-        if self.shape_type == "rectangle":
+        if self.edit_mode == "rectangle":
             rect = QRectF(self.shape_start_point, end_point).normalized()
             shape_item = DrawingRectItem(rect, self.drawing_pen)
-        elif self.shape_type == "circle":
+        elif self.edit_mode == "circle":
             rect = QRectF(self.shape_start_point, end_point).normalized()
             shape_item = DrawingEllipseItem(rect, self.drawing_pen)
-        elif self.shape_type == "triangle":
+        elif self.edit_mode == "triangle":
             # Create triangle points
             if end_point.y() < self.shape_start_point.y():  # Triangle pointing up
                 points = [

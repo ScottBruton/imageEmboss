@@ -342,12 +342,9 @@ class GUIMethods:
     
     def zoom_in(self):
         """Zoom in on the preview"""
-        print("DEBUG: zoom_in() button called")
-        
         # Get center of view for zoom
         center = self.dxf_view.mapToScene(self.dxf_view.viewport().rect().center())
         old_pos = center
-        print(f"DEBUG: Button zoom - old center: {old_pos}")
         
         # Apply zoom
         self.dxf_view.scale(1.2, 1.2)
@@ -355,17 +352,13 @@ class GUIMethods:
         # Keep center position stable
         new_pos = self.dxf_view.mapToScene(self.dxf_view.viewport().rect().center())
         delta = new_pos - old_pos
-        print(f"DEBUG: Button zoom - delta: {delta}")
         self.dxf_view.translate(delta.x(), delta.y())
     
     def zoom_out(self):
         """Zoom out on the preview"""
-        print("DEBUG: zoom_out() button called")
-        
         # Get center of view for zoom
         center = self.dxf_view.mapToScene(self.dxf_view.viewport().rect().center())
         old_pos = center
-        print(f"DEBUG: Button zoom out - old center: {old_pos}")
         
         # Apply zoom
         self.dxf_view.scale(0.8, 0.8)
@@ -373,7 +366,6 @@ class GUIMethods:
         # Keep center position stable
         new_pos = self.dxf_view.mapToScene(self.dxf_view.viewport().rect().center())
         delta = new_pos - old_pos
-        print(f"DEBUG: Button zoom out - delta: {delta}")
         self.dxf_view.translate(delta.x(), delta.y())
     
     def zoom_reset(self):
@@ -396,20 +388,21 @@ class GUIMethods:
     
     def set_edit_mode(self, mode):
         """Set the edit mode for the DXF view"""
-        self.dxf_view.set_edit_mode(mode)
-        self.edit_mode = mode
+        if mode == "shapes":
+            # For shapes mode, get the actual shape type from the combo box
+            shape_type = self.shape_combo.currentText().lower()
+            self.dxf_view.set_edit_mode(shape_type)
+            self.dxf_view.set_shape_type(shape_type)
+            self.edit_mode = shape_type
+        else:
+            self.dxf_view.set_edit_mode(mode)
+            self.edit_mode = mode
         
         # Set cursor based on mode
         if mode == "view":
             cursor = QCursor(Qt.ArrowCursor)
-        elif mode == "paint":
-            cursor = QCursor(Qt.CrossCursor)
-        elif mode == "eraser":
-            cursor = QCursor(Qt.CrossCursor)  # Could create custom eraser cursor
-        elif mode == "line":
-            cursor = QCursor(Qt.CrossCursor)
-        elif mode == "shape":
-            cursor = QCursor(Qt.CrossCursor)
+        elif mode in ["paint", "eraser", "line", "shapes"]:
+            cursor = QCursor(Qt.CrossCursor)  # Cross cursor for all drawing modes
         else:
             cursor = QCursor(Qt.ArrowCursor)
         
@@ -419,7 +412,7 @@ class GUIMethods:
     
     def set_shape_mode(self):
         """Set shape drawing mode"""
-        shape_type = self.shape_combo.currentText()
+        shape_type = self.shape_combo.currentText().lower()
         self.dxf_view.set_shape_type(shape_type)
         self.dxf_view.set_edit_mode(shape_type)
         self.edit_mode = shape_type

@@ -57,6 +57,7 @@ class ImageGraphicsView(QGraphicsView):
         self.zoom_factor = 1.0
         self.pan_start = QPoint()
         self.panning = False
+        self.middle_mouse_panning = False
         
         # Image item
         self.image_item = None
@@ -163,6 +164,11 @@ class ImageGraphicsView(QGraphicsView):
             else:
                 # Start drawing
                 self.start_drawing(scene_point)
+        elif event.button() == Qt.MiddleButton:
+            # Middle mouse button for panning (works in any mode)
+            self.pan_start = event.position().toPoint()
+            self.middle_mouse_panning = True
+            self.setCursor(Qt.ClosedHandCursor)
         
         super().mousePressEvent(event)
     
@@ -171,6 +177,14 @@ class ImageGraphicsView(QGraphicsView):
         scene_point = self.mapToScene(event.position().toPoint())
         
         if self.panning and self.edit_mode == "view":
+            delta = event.position().toPoint() - self.pan_start
+            self.horizontalScrollBar().setValue(
+                self.horizontalScrollBar().value() - delta.x())
+            self.verticalScrollBar().setValue(
+                self.verticalScrollBar().value() - delta.y())
+            self.pan_start = event.position().toPoint()
+        elif self.middle_mouse_panning:
+            # Middle mouse panning (works in any mode)
             delta = event.position().toPoint() - self.pan_start
             self.horizontalScrollBar().setValue(
                 self.horizontalScrollBar().value() - delta.x())
@@ -197,6 +211,12 @@ class ImageGraphicsView(QGraphicsView):
             elif self.drawing:
                 # Finish drawing
                 self.finish_drawing(scene_point)
+        elif event.button() == Qt.MiddleButton:
+            # Middle mouse button release
+            if self.middle_mouse_panning:
+                self.middle_mouse_panning = False
+                # Restore cursor based on current edit mode
+                self._restore_cursor_for_mode()
         
         super().mouseReleaseEvent(event)
     
@@ -206,6 +226,13 @@ class ImageGraphicsView(QGraphicsView):
         if self.image_item:
             self.fitInView(self.image_item, Qt.KeepAspectRatio)
             self.zoom_factor = 1.0
+    
+    def _restore_cursor_for_mode(self):
+        """Restore cursor based on current edit mode"""
+        if self.edit_mode == "view":
+            self.setCursor(Qt.ArrowCursor)
+        elif self.edit_mode in ["paint", "line", "eraser", "rectangle", "triangle", "circle"]:
+            self.setCursor(Qt.CrossCursor)
     
     def set_edit_mode(self, mode):
         """Set the current edit mode"""

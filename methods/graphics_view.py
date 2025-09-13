@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (QGraphicsView, QGraphicsScene, QGraphicsPixmapIte
                                QGraphicsEllipseItem, QGraphicsPolygonItem)
 from PySide6.QtCore import Qt, QPoint, QPointF, QRectF, QLineF, Signal, QMimeData, QDateTime
 from PySide6.QtGui import (QPainter, QPen, QColor, QImage, QPixmap, QPainterPath, 
-                          QDragEnterEvent, QDropEvent, QPolygonF, QTransform)
+                          QDragEnterEvent, QDropEvent, QPolygonF, QTransform, QCursor)
 
 from .graphics_items import (DrawingPathItem, DrawingLineItem, DrawingRectItem, 
                            DrawingEllipseItem, DrawingPolygonItem)
@@ -28,10 +28,17 @@ class ImageGraphicsView(QGraphicsView):
     zoom_in_requested = Signal()
     zoom_out_requested = Signal()
     
+    # Signal for area processing
+    area_process_requested = Signal(QPointF, int)  # point, radius
+    
     def __init__(self, parent=None):
         super().__init__(parent)
         self.scene = QGraphicsScene()
+        self.scene.setBackgroundBrush(Qt.transparent)  # Make scene background transparent
         self.setScene(self.scene)
+        
+        # Make the view background transparent too
+        self.setStyleSheet("background: transparent;")
         
         # Enable mouse tracking for better interaction
         self.setMouseTracking(True)
@@ -63,7 +70,7 @@ class ImageGraphicsView(QGraphicsView):
         self.image_item = None
         
         # Drawing tool variables
-        self.edit_mode = "view"  # view, paint, eraser, line, rectangle, triangle, circle
+        self.edit_mode = "view"  # view, paint, eraser, line, rectangle, triangle, circle, area_process, edge_draw
         self.drawing = False
         self.drawing_path = QPainterPath()
         self.drawing_points = []
@@ -77,6 +84,9 @@ class ImageGraphicsView(QGraphicsView):
         # Drawing pen settings
         self.drawing_pen = QPen(QColor(0, 0, 255), 2, Qt.SolidLine)  # Blue pen
         self.eraser_radius = 15
+        
+        # Area processing radius
+        self.area_process_radius = 50
         
         # Shape drawing variables
         self.shape_start_point = QPointF()
@@ -161,6 +171,12 @@ class ImageGraphicsView(QGraphicsView):
                 self.setCursor(Qt.ClosedHandCursor)
             elif self.edit_mode == "eraser":
                 self.erase_at_point(scene_point)
+            elif self.edit_mode == "area_process":
+                print(f"DEBUG: Area process clicked at {scene_point}")
+                print(f"DEBUG: Emitting signal with radius {self.area_process_radius}")
+                # Process area for edge detection
+                self.area_process_requested.emit(scene_point, self.area_process_radius)
+                print("DEBUG: Signal emitted")
             else:
                 # Start drawing
                 self.start_drawing(scene_point)
@@ -259,10 +275,32 @@ class ImageGraphicsView(QGraphicsView):
             # Use cross cursor for shape modes
             self.setCursor(Qt.CrossCursor)
             self.setDragMode(QGraphicsView.NoDrag)
+        elif mode == "area_process":
+            print("DEBUG: Setting area_process mode with circle cursor")
+            # Use a custom circle cursor for area processing mode
+            # Create a circular cursor
+            cursor_pixmap = QPixmap(32, 32)
+            cursor_pixmap.fill(Qt.transparent)
+            painter = QPainter(cursor_pixmap)
+            painter.setPen(QPen(Qt.red, 2))
+            painter.drawEllipse(2, 2, 28, 28)
+            painter.end()
+            cursor = QCursor(cursor_pixmap, 16, 16)  # Center the cursor
+            self.setCursor(cursor)
+            self.setDragMode(QGraphicsView.NoDrag)
+            print("DEBUG: Circle cursor set")
+        elif mode == "edge_draw":
+            # Use a brush cursor for edge drawing mode
+            self.setCursor(Qt.CrossCursor)
+            self.setDragMode(QGraphicsView.NoDrag)
     
     def set_shape_type(self, shape_type):
         """Set the shape type for shape drawing"""
         self.shape_type = shape_type
+    
+    def set_area_process_radius(self, radius):
+        """Set the radius for area processing"""
+        self.area_process_radius = radius
     
     def start_drawing(self, point):
         """Start drawing operation"""

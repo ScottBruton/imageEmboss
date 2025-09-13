@@ -76,6 +76,13 @@ class GUIMethods:
             # Clear drawing items
             self.dxf_view.clear_drawing_items()
             
+            # Store original pixmap for transparent background
+            img_rgb = cv2.cvtColor(self.original_image, cv2.COLOR_BGR2RGB)
+            h, w, ch = img_rgb.shape
+            bytes_per_line = ch * w
+            qt_image = QImage(img_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
+            self.original_pixmap = QPixmap.fromImage(qt_image)
+            
             # Update status and dimensions
             h, w = self.original_image.shape[:2]
             self.status_label.setText(f"Loaded: {os.path.basename(path)}")
@@ -166,11 +173,21 @@ class GUIMethods:
         for item in items_to_remove:
             self.dxf_view.scene.removeItem(item)
         
-        # Create a white background if no image is set
-        if not self.dxf_view.image_item:
-            h, w = self.original_image.shape[:2]
-            white_image = np.ones((h, w, 3), dtype=np.uint8) * 255
-            self.dxf_view.set_image(white_image)
+        # Add original image as background FIRST
+        if hasattr(self, 'original_pixmap') and self.original_pixmap:
+            # Add the full original image as background
+            background_item = QGraphicsPixmapItem(self.original_pixmap)
+            background_item.setZValue(-100)  # Way behind everything
+            background_item.is_background = True  # Mark as background
+            
+            # Set transparency based on slider value
+            transparency = getattr(self, 'background_transparency', 0) / 100.0
+            print(f"DEBUG: Setting background opacity to {1.0 - transparency} (transparency: {transparency})")
+            background_item.setOpacity(1.0 - transparency)  # 0% slider = opaque, 100% slider = transparent
+            
+            self.dxf_view.scene.addItem(background_item)
+        
+        # No need for white background - we want the original image to show through
         
         # Draw contours as graphics items
         for i, contour in enumerate(self.current_contours):
@@ -217,6 +234,7 @@ class GUIMethods:
                     
                     polygon_item = QGraphicsPolygonItem(polygon)
                     polygon_item.setPen(pen)
+                    polygon_item.setZValue(1)  # Above background
                     
                     # Add transparent light green fill
                     light_green = QColor(144, 238, 144, 80)  # Light green with transparency
@@ -228,6 +246,7 @@ class GUIMethods:
                     from PySide6.QtWidgets import QGraphicsPathItem
                     path_item = QGraphicsPathItem(path)
                     path_item.setPen(pen)
+                    path_item.setZValue(1)  # Above background
                     self.dxf_view.scene.addItem(path_item)
         
         # Draw edited contours (manually added)
@@ -250,6 +269,7 @@ class GUIMethods:
                 from PySide6.QtWidgets import QGraphicsPathItem
                 path_item = QGraphicsPathItem(path)
                 path_item.setPen(pen)
+                path_item.setZValue(1)  # Above background
                 self.dxf_view.scene.addItem(path_item)
     
     def on_param_change(self):
@@ -259,6 +279,17 @@ class GUIMethods:
             self.preset_combo.setCurrentText("Custom")
         
         self.update_preview()
+    
+    def on_transparency_change(self):
+        """Handle background transparency changes"""
+        # Update the transparency value
+        self.background_transparency = self.transparency_slider.value()
+        
+        # Update the label
+        self.transparency_label.setText(f"{self.background_transparency}%")
+        
+        # Refresh the preview to apply new transparency
+        self.display_dxf_preview()
     
     def on_preset_change(self, preset_name):
         """Handle preset changes"""
@@ -433,7 +464,7 @@ class GUIMethods:
         # Set cursor based on mode
         if mode == "view":
             cursor = QCursor(Qt.ArrowCursor)
-        elif mode in ["paint", "eraser", "line", "shapes"]:
+        elif mode in ["paint", "eraser", "line", "shapes", "area_process", "edge_draw"]:
             cursor = QCursor(Qt.CrossCursor)  # Cross cursor for all drawing modes
         else:
             cursor = QCursor(Qt.ArrowCursor)
@@ -545,6 +576,76 @@ class GUIMethods:
         if self.edit_mode in ["rectangle", "triangle", "circle"]:
             self.dxf_view.set_shape_type(shape_type)
     
+    def process_area_for_edges(self, scene_point, radius):
+        """Process a circular area for edge detection and add new contours"""
+        print(f"DEBUG: process_area_for_edges called with point {scene_point}, radius {radius}")
+        if self.original_image is None:
+            print("DEBUG: No original image, returning")
+            return
+        
+        h, w = self.original_image.shape[:2]
+        
+        # Transform scene coordinates to image coordinates
+        if self.dxf_view.image_item:
+            image_rect = self.dxf_view.image_item.boundingRect()
+            x = int((scene_point.x() / image_rect.width()) * w)
+            y = int((scene_point.y() / image_rect.height()) * h)
+            
+            # Clamp to image bounds
+            x = max(0, min(x, w - 1))
+            y = max(0, min(y, h - 1))
+            
+            # Extract a rectangular region around the point
+            x1 = max(0, x - radius)
+            y1 = max(0, y - radius)
+            x2 = min(w, x + radius)
+            y2 = min(h, y + radius)
+            
+            # Extract the rectangular area from the original image
+            roi = self.original_image[y1:y2, x1:x2]
+            print(f"DEBUG: ROI extracted: shape {roi.shape}, region ({x1},{y1}) to ({x2},{y2})")
+            
+            # Process this area for edges using the same parameters
+            edges = find_edges_and_contours(roi, self.params)
+            print(f"DEBUG: Edge processing result shape: {edges.shape}, non-zero pixels: {np.count_nonzero(edges)}")
+            
+            # Find contours in this area
+            area_contours = contours_from_mask(
+                edges,
+                self.params["largest_n"],
+                self.params["simplify_pct"],
+                self.params["gap_threshold"]
+            )
+            print(f"DEBUG: Found {len(area_contours)} contours in processed area")
+            
+            # Adjust contours back to full image coordinates
+            adjusted_contours = []
+            for contour in area_contours:
+                # Offset the contour coordinates back to the full image
+                adjusted_contour = contour.copy()
+                adjusted_contour[:, :, 0] += x1  # Add x offset
+                adjusted_contour[:, :, 1] += y1  # Add y offset
+                adjusted_contours.append(adjusted_contour)
+            
+            # Filter out tiny contours (artifacts)
+            filtered_contours = []
+            for contour in adjusted_contours:
+                area = cv2.contourArea(contour)
+                if area > 50:  # Only keep contours with area > 50 pixels
+                    filtered_contours.append(contour)
+            
+            # Add new contours to existing ones
+            if filtered_contours:
+                self.current_contours.extend(filtered_contours)
+                
+                # Refresh the preview
+                self.display_dxf_preview()
+                
+                # Show status message
+                self.status_bar.showMessage(f"Added {len(filtered_contours)} new contours from area processing")
+            else:
+                self.status_bar.showMessage("No significant edges found in the selected area")
+
     def convert_drawing_items_to_contours(self):
         """Convert drawing items to contours for DXF export"""
         contours = []

@@ -48,6 +48,9 @@ class ImageEmbossGUI(QMainWindow, GUIMethods):
         self.erased_contours = set()
         self.erased_points = set()
         
+        # Background transparency
+        self.background_transparency = 0  # Default opaque
+        
         # Default parameters
         self.params = {
             "bilateral_diameter": 9,
@@ -210,6 +213,7 @@ class ImageEmbossGUI(QMainWindow, GUIMethods):
         self.dxf_view = ImageGraphicsView()
         self.dxf_view.setMinimumSize(100, 100)  # Much smaller minimum
         self.dxf_view.image_dropped.connect(self.load_image_from_path)
+        self.dxf_view.area_process_requested.connect(self.process_area_for_edges)
         dxf_layout.addWidget(self.dxf_view)
         
         layout.addWidget(dxf_group, 1)  # Takes all remaining space
@@ -521,6 +525,23 @@ class ImageEmbossGUI(QMainWindow, GUIMethods):
         
         layout.addLayout(scale_layout)
         
+        # Background Transparency
+        transparency_layout = QHBoxLayout()
+        transparency_layout.addWidget(QLabel("Background Transparency:"))
+        
+        self.transparency_slider = QSlider(Qt.Horizontal)
+        self.transparency_slider.setRange(0, 100)
+        self.transparency_slider.setValue(0)  # Default opaque (0% transparent)
+        self.transparency_slider.valueChanged.connect(self.on_transparency_change)
+        self.transparency_slider.setToolTip("Controls background image transparency (0=opaque, 100=transparent)")
+        transparency_layout.addWidget(self.transparency_slider)
+        
+        self.transparency_label = QLabel("0%")
+        self.transparency_label.setMinimumWidth(30)
+        transparency_layout.addWidget(self.transparency_label)
+        
+        layout.addLayout(transparency_layout)
+        
         # Invert checkbox
         self.invert_checkbox = QCheckBox("Invert Black/White")
         self.invert_checkbox.setChecked(True)
@@ -722,6 +743,28 @@ class ImageEmbossGUI(QMainWindow, GUIMethods):
         self.shape_btn.clicked.connect(lambda: self.set_edit_mode("shapes"))
         self.edit_button_group.addButton(self.shape_btn, 4)
         layout.addWidget(self.shape_btn)
+        
+        layout.addSpacing(10)
+        
+        # Area processing button
+        self.area_process_btn = QPushButton("🎯")
+        self.area_process_btn.setMaximumSize(25, 25)
+        self.area_process_btn.setCheckable(True)
+        self.area_process_btn.setToolTip("Process area for edges")
+        self.area_process_btn.clicked.connect(lambda: self.set_edit_mode("area_process"))
+        self.edit_button_group.addButton(self.area_process_btn, 5)
+        layout.addWidget(self.area_process_btn)
+        
+        layout.addSpacing(10)
+        
+        # Edge drawing button
+        self.edge_draw_btn = QPushButton("🖌️")
+        self.edge_draw_btn.setMaximumSize(25, 25)
+        self.edge_draw_btn.setCheckable(True)
+        self.edge_draw_btn.setToolTip("Draw areas for edge finding")
+        self.edge_draw_btn.clicked.connect(lambda: self.set_edit_mode("edge_draw"))
+        self.edit_button_group.addButton(self.edge_draw_btn, 6)
+        layout.addWidget(self.edge_draw_btn)
         
         layout.addStretch()  # Push everything to the left
         

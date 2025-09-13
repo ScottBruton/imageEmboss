@@ -262,13 +262,119 @@ class GUIMethods:
             new_w = int(w * scale)
             self.output_size_label.setText(f"Output: {new_w}×{new_h}px")
     
+    def on_bilateral_d_preset_change(self, preset):
+        """Handle bilateral diameter preset change"""
+        presets = {"Small": 6, "Medium": 9, "Large": 12}
+        if preset in presets:
+            self.bilateral_d_slider.setValue(presets[preset])
+            self.bilateral_d_label.setText(str(presets[preset]))
+            self.on_param_change()
+    
+    def on_bilateral_c_preset_change(self, preset):
+        """Handle bilateral color preset change"""
+        presets = {"Low": 40, "Medium": 75, "High": 120}
+        if preset in presets:
+            self.bilateral_c_slider.setValue(presets[preset])
+            self.bilateral_c_label.setText(str(presets[preset]))
+            self.on_param_change()
+    
+    def on_gaussian_preset_change(self, preset):
+        """Handle gaussian preset change"""
+        presets = {"Light": 3, "Medium": 5, "Heavy": 7}
+        if preset in presets:
+            self.gaussian_slider.setValue(presets[preset])
+            self.gaussian_label.setText(str(presets[preset]))
+            self.on_param_change()
+    
+    def on_canny_preset_change(self, preset):
+        """Handle canny preset change"""
+        presets = {
+            "Sensitive": {"lower": 20, "upper": 60},
+            "Medium": {"lower": 30, "upper": 100},
+            "Conservative": {"lower": 50, "upper": 150}
+        }
+        if preset in presets:
+            self.canny_l_slider.setValue(presets[preset]["lower"])
+            self.canny_l_label.setText(str(presets[preset]["lower"]))
+            self.canny_u_slider.setValue(presets[preset]["upper"])
+            self.canny_u_label.setText(str(presets[preset]["upper"]))
+            self.on_param_change()
+    
+    def on_thickness_preset_change(self, preset):
+        """Handle thickness preset change"""
+        presets = {"Thin": 1, "Medium": 3, "Thick": 6}
+        if preset in presets:
+            self.thickness_slider.setValue(presets[preset])
+            self.thickness_label.setText(str(presets[preset]))
+            self.on_param_change()
+    
+    def on_gap_preset_change(self, preset):
+        """Handle gap preset change"""
+        presets = {"None": 0, "Light": 3, "Medium": 5, "Heavy": 10}
+        if preset in presets:
+            self.gap_slider.setValue(presets[preset])
+            self.gap_label.setText(str(presets[preset]))
+            self.on_param_change()
+    
+    def on_largest_preset_change(self, preset):
+        """Handle largest preset change"""
+        presets = {"Few": 3, "Medium": 10, "Many": 30}
+        if preset in presets:
+            self.largest_slider.setValue(presets[preset])
+            self.largest_label.setText(str(presets[preset]))
+            self.on_param_change()
+    
+    def on_simplify_preset_change(self, preset):
+        """Handle simplify preset change"""
+        presets = {"Detailed": 20, "Medium": 50, "Simple": 100}
+        if preset in presets:
+            self.simplify_slider.setValue(presets[preset])
+            self.simplify_label.setText(str(presets[preset]))
+            self.on_param_change()
+    
+    def on_scale_preset_change(self, preset):
+        """Handle scale preset change"""
+        presets = {"Small": 15, "Medium": 25, "Large": 100}
+        if preset in presets:
+            self.scale_slider.setValue(presets[preset])
+            self.scale_label.setText(str(presets[preset]))
+            self.on_param_change()
+    
     def zoom_in(self):
         """Zoom in on the preview"""
+        print("DEBUG: zoom_in() button called")
+        
+        # Get center of view for zoom
+        center = self.dxf_view.mapToScene(self.dxf_view.viewport().rect().center())
+        old_pos = center
+        print(f"DEBUG: Button zoom - old center: {old_pos}")
+        
+        # Apply zoom
         self.dxf_view.scale(1.2, 1.2)
+        
+        # Keep center position stable
+        new_pos = self.dxf_view.mapToScene(self.dxf_view.viewport().rect().center())
+        delta = new_pos - old_pos
+        print(f"DEBUG: Button zoom - delta: {delta}")
+        self.dxf_view.translate(delta.x(), delta.y())
     
     def zoom_out(self):
         """Zoom out on the preview"""
+        print("DEBUG: zoom_out() button called")
+        
+        # Get center of view for zoom
+        center = self.dxf_view.mapToScene(self.dxf_view.viewport().rect().center())
+        old_pos = center
+        print(f"DEBUG: Button zoom out - old center: {old_pos}")
+        
+        # Apply zoom
         self.dxf_view.scale(0.8, 0.8)
+        
+        # Keep center position stable
+        new_pos = self.dxf_view.mapToScene(self.dxf_view.viewport().rect().center())
+        delta = new_pos - old_pos
+        print(f"DEBUG: Button zoom out - delta: {delta}")
+        self.dxf_view.translate(delta.x(), delta.y())
     
     def zoom_reset(self):
         """Reset zoom to fit"""
@@ -276,8 +382,13 @@ class GUIMethods:
     
     def pan_preview(self, dx, dy):
         """Pan the preview"""
-        # This would need custom implementation in the graphics view
-        pass
+        # Use QGraphicsView's built-in pan functionality
+        self.dxf_view.horizontalScrollBar().setValue(
+            self.dxf_view.horizontalScrollBar().value() - dx * 20
+        )
+        self.dxf_view.verticalScrollBar().setValue(
+            self.dxf_view.verticalScrollBar().value() - dy * 20
+        )
     
     def pan_reset(self):
         """Reset pan position"""

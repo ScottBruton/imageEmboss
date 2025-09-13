@@ -24,6 +24,10 @@ class ImageGraphicsView(QGraphicsView):
     # Signal for image drop
     image_dropped = Signal(str)
     
+    # Signal for zoom events
+    zoom_in_requested = Signal()
+    zoom_out_requested = Signal()
+    
     def __init__(self, parent=None):
         super().__init__(parent)
         self.scene = QGraphicsScene()
@@ -39,6 +43,15 @@ class ImageGraphicsView(QGraphicsView):
         
         # Enable drag and drop
         self.setAcceptDrops(True)
+        
+        # Set zoom behavior - allow unlimited zoom
+        self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
+        self.setResizeAnchor(QGraphicsView.AnchorUnderMouse)
+        
+        # Remove zoom limits by overriding the default behavior
+        self.setDragMode(QGraphicsView.NoDrag)  # Disable default drag mode
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         
         # Zoom and pan variables
         self.zoom_factor = 1.0
@@ -78,22 +91,46 @@ class ImageGraphicsView(QGraphicsView):
             self.image_item = QGraphicsPixmapItem(pixmap)
             self.scene.addItem(self.image_item)
             
-            # Fit image in view
-            self.fitInView(self.image_item, Qt.KeepAspectRatio)
+            # Don't auto-fit to allow manual zoom control
+            # self.fitInView(self.image_item, Qt.KeepAspectRatio)
             self.zoom_factor = 1.0
     
     def resizeEvent(self, event):
         """Handle resize events to auto-fit image"""
         super().resizeEvent(event)
-        if self.image_item is not None:
-            # Auto-fit image when view is resized
-            self.fitInView(self.image_item, Qt.KeepAspectRatio)
-            self.zoom_factor = 1.0
+        # Disable auto-fit to prevent interference with zoom
+        # if self.image_item is not None:
+        #     # Auto-fit image when view is resized
+        #     self.fitInView(self.image_item, Qt.KeepAspectRatio)
+        #     self.zoom_factor = 1.0
+    
+    def scale(self, sx, sy):
+        """Override scale to remove zoom limits"""
+        print(f"DEBUG: scale() called with sx={sx}, sy={sy}")
+        
+        # Get current transformation matrix
+        matrix = self.transform()
+        print(f"DEBUG: Current matrix scale: {matrix.m11()}, {matrix.m22()}")
+        
+        # Apply scaling to the matrix
+        matrix.scale(sx, sy)
+        print(f"DEBUG: New matrix scale: {matrix.m11()}, {matrix.m22()}")
+        
+        # Set the new transformation matrix (this bypasses any built-in limits)
+        self.setTransform(matrix)
+        print(f"DEBUG: Transform set successfully")
+        
+        # Force update the zoom factor to match the actual matrix
+        self.zoom_factor = matrix.m11()
+        print(f"DEBUG: Updated zoom_factor to: {self.zoom_factor}")
     
     def wheelEvent(self, event):
-        """Handle mouse wheel zoom"""
+        """Handle mouse wheel zoom with unlimited zoom"""
+        print(f"DEBUG: wheelEvent called, angleDelta: {event.angleDelta().y()}")
+        
         # Get the position of the mouse before zooming
         old_pos = self.mapToScene(event.position().toPoint())
+        print(f"DEBUG: Old mouse position: {old_pos}")
         
         # Zoom
         zoom_in_factor = 1.15
@@ -101,17 +138,23 @@ class ImageGraphicsView(QGraphicsView):
         
         if event.angleDelta().y() > 0:
             zoom_factor = zoom_in_factor
+            print(f"DEBUG: Zooming IN with factor: {zoom_factor}")
         else:
             zoom_factor = zoom_out_factor
+            print(f"DEBUG: Zooming OUT with factor: {zoom_factor}")
             
+        # Apply zoom without limits
         self.scale(zoom_factor, zoom_factor)
         self.zoom_factor *= zoom_factor
+        print(f"DEBUG: New zoom_factor: {self.zoom_factor}")
         
         # Get the new position
         new_pos = self.mapToScene(event.position().toPoint())
+        print(f"DEBUG: New mouse position: {new_pos}")
         
-        # Move scene to old position
+        # Move scene to old position to keep cursor position stable
         delta = new_pos - old_pos
+        print(f"DEBUG: Delta to translate: {delta}")
         self.translate(delta.x(), delta.y())
         
         event.accept()

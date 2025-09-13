@@ -223,6 +223,15 @@ class ImageEmbossGUI(QMainWindow, GUIMethods):
         
         # Bilateral Diameter
         bilateral_d_layout = QHBoxLayout()
+        
+        # Bilateral diameter preset
+        bilateral_d_preset_combo = QComboBox()
+        bilateral_d_preset_combo.addItems(["Small", "Medium", "Large"])
+        bilateral_d_preset_combo.setCurrentText("Medium")
+        bilateral_d_preset_combo.currentTextChanged.connect(self.on_bilateral_d_preset_change)
+        bilateral_d_preset_combo.setToolTip("Bilateral diameter presets: Small(6), Medium(9), Large(12)")
+        bilateral_d_layout.addWidget(bilateral_d_preset_combo)
+        
         bilateral_d_label = QLabel("Bilateral Diameter:")
         bilateral_d_label.setToolTip("Controls how much the image is smoothed while preserving edges. Higher values smooth more but may blur important details.")
         bilateral_d_layout.addWidget(bilateral_d_label)
@@ -242,6 +251,15 @@ class ImageEmbossGUI(QMainWindow, GUIMethods):
         
         # Bilateral Sigma Color
         bilateral_c_layout = QHBoxLayout()
+        
+        # Bilateral color preset
+        bilateral_c_preset_combo = QComboBox()
+        bilateral_c_preset_combo.addItems(["Low", "Medium", "High"])
+        bilateral_c_preset_combo.setCurrentText("Medium")
+        bilateral_c_preset_combo.currentTextChanged.connect(self.on_bilateral_c_preset_change)
+        bilateral_c_preset_combo.setToolTip("Bilateral color presets: Low(40), Medium(75), High(120)")
+        bilateral_c_layout.addWidget(bilateral_c_preset_combo)
+        
         bilateral_c_label = QLabel("Bilateral Color σ:")
         bilateral_c_label.setToolTip("Controls how similar colors need to be to be smoothed together. Higher values allow more different colors to be smoothed.")
         bilateral_c_layout.addWidget(bilateral_c_label)
@@ -261,6 +279,15 @@ class ImageEmbossGUI(QMainWindow, GUIMethods):
         
         # Gaussian Kernel Size
         gaussian_layout = QHBoxLayout()
+        
+        # Gaussian preset
+        gaussian_preset_combo = QComboBox()
+        gaussian_preset_combo.addItems(["Light", "Medium", "Heavy"])
+        gaussian_preset_combo.setCurrentText("Medium")
+        gaussian_preset_combo.currentTextChanged.connect(self.on_gaussian_preset_change)
+        gaussian_preset_combo.setToolTip("Gaussian blur presets: Light(3), Medium(5), Heavy(7)")
+        gaussian_layout.addWidget(gaussian_preset_combo)
+        
         gaussian_label = QLabel("Gaussian Kernel:")
         gaussian_label.setToolTip("Controls the amount of blur applied to the image. Higher values create more blur, which can help reduce noise but may soften important edges.")
         gaussian_layout.addWidget(gaussian_label)
@@ -284,6 +311,19 @@ class ImageEmbossGUI(QMainWindow, GUIMethods):
         """Create the edge detection parameters tab"""
         tab = QWidget()
         layout = QVBoxLayout(tab)
+        
+        # Canny preset
+        canny_preset_layout = QHBoxLayout()
+        canny_preset_combo = QComboBox()
+        canny_preset_combo.addItems(["Sensitive", "Medium", "Conservative"])
+        canny_preset_combo.setCurrentText("Medium")
+        canny_preset_combo.currentTextChanged.connect(self.on_canny_preset_change)
+        canny_preset_combo.setToolTip("Canny edge presets: Sensitive(20/60), Medium(30/100), Conservative(50/150)")
+        canny_preset_layout.addWidget(canny_preset_combo)
+        
+        canny_label = QLabel("Canny Edge Detection")
+        canny_preset_layout.addWidget(canny_label)
+        layout.addLayout(canny_preset_layout)
         
         # Canny Lower Threshold
         canny_l_layout = QHBoxLayout()
@@ -325,6 +365,15 @@ class ImageEmbossGUI(QMainWindow, GUIMethods):
         
         # Edge Thickness
         thickness_layout = QHBoxLayout()
+        
+        # Thickness preset
+        thickness_preset_combo = QComboBox()
+        thickness_preset_combo.addItems(["Thin", "Medium", "Thick"])
+        thickness_preset_combo.setCurrentText("Medium")
+        thickness_preset_combo.currentTextChanged.connect(self.on_thickness_preset_change)
+        thickness_preset_combo.setToolTip("Edge thickness presets: Thin(1.0), Medium(2.5), Thick(6.0)")
+        thickness_layout.addWidget(thickness_preset_combo)
+        
         thickness_label = QLabel("Edge Thickness:")
         thickness_label.setToolTip("Controls how thick the lines will be in your final DXF file. Higher values create thicker lines, lower values create thinner lines.")
         thickness_layout.addWidget(thickness_label)
@@ -351,6 +400,15 @@ class ImageEmbossGUI(QMainWindow, GUIMethods):
         
         # Gap Threshold
         gap_layout = QHBoxLayout()
+        
+        # Gap preset
+        gap_preset_combo = QComboBox()
+        gap_preset_combo.addItems(["None", "Light", "Medium", "Heavy"])
+        gap_preset_combo.setCurrentText("Medium")
+        gap_preset_combo.currentTextChanged.connect(self.on_gap_preset_change)
+        gap_preset_combo.setToolTip("Gap closing presets: None(0), Light(2.5), Medium(5.0), Heavy(10.0)")
+        gap_layout.addWidget(gap_preset_combo)
+        
         gap_label = QLabel("Gap Threshold:")
         gap_label.setToolTip("Controls how close edges need to be to be connected together. Higher values connect edges that are farther apart.")
         gap_layout.addWidget(gap_label)
@@ -377,6 +435,15 @@ class ImageEmbossGUI(QMainWindow, GUIMethods):
         
         # Largest N
         largest_layout = QHBoxLayout()
+        
+        # Largest preset
+        largest_preset_combo = QComboBox()
+        largest_preset_combo.addItems(["Few", "Medium", "Many"])
+        largest_preset_combo.setCurrentText("Medium")
+        largest_preset_combo.currentTextChanged.connect(self.on_largest_preset_change)
+        largest_preset_combo.setToolTip("Contour count presets: Few(3), Medium(10), Many(30)")
+        largest_layout.addWidget(largest_preset_combo)
+        
         largest_label = QLabel("Largest N:")
         largest_label.setToolTip("Controls how many of the largest shapes to keep. Higher values keep more shapes, lower values keep only the biggest ones.")
         largest_layout.addWidget(largest_label)
@@ -396,6 +463,15 @@ class ImageEmbossGUI(QMainWindow, GUIMethods):
         
         # Simplify
         simplify_layout = QHBoxLayout()
+        
+        # Simplify preset
+        simplify_preset_combo = QComboBox()
+        simplify_preset_combo.addItems(["Detailed", "Medium", "Simple"])
+        simplify_preset_combo.setCurrentText("Medium")
+        simplify_preset_combo.currentTextChanged.connect(self.on_simplify_preset_change)
+        simplify_preset_combo.setToolTip("Simplification presets: Detailed(0.2), Medium(0.5), Simple(1.0)")
+        simplify_layout.addWidget(simplify_preset_combo)
+        
         simplify_label = QLabel("Simplify %:")
         simplify_label.setToolTip("Controls how much detail to remove from the shapes. Higher values create simpler shapes with fewer points, lower values keep more detail.")
         simplify_layout.addWidget(simplify_label)
@@ -422,6 +498,15 @@ class ImageEmbossGUI(QMainWindow, GUIMethods):
         
         # Scale
         scale_layout = QHBoxLayout()
+        
+        # Scale preset
+        scale_preset_combo = QComboBox()
+        scale_preset_combo.addItems(["Small", "Medium", "Large"])
+        scale_preset_combo.setCurrentText("Medium")
+        scale_preset_combo.currentTextChanged.connect(self.on_scale_preset_change)
+        scale_preset_combo.setToolTip("Scale presets: Small(0.15), Medium(0.25), Large(1.0)")
+        scale_layout.addWidget(scale_preset_combo)
+        
         scale_layout.addWidget(QLabel("Scale (mm/px):"))
         
         self.scale_slider = QSlider(Qt.Horizontal)

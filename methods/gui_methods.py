@@ -1267,15 +1267,17 @@ class GUIMethods:
         format_msg = QMessageBox()
         format_msg.setWindowTitle("Export Format")
         format_msg.setText("Choose export format:")
-        format_msg.setInformativeText("DXF: 2D vector format\nSTEP: 3D extruded geometry (STEP format)\nSTL: 3D mesh format (widely supported)")
+        format_msg.setInformativeText("DXF: 2D vector format\nSTEP: 3D extruded geometry (STEP format)\nOBJ: 3D mesh format (widely supported)\nSTL: 3D mesh format (widely supported)")
         
         dxf_btn = QPushButton("DXF")
         step_btn = QPushButton("STEP")
+        obj_btn = QPushButton("OBJ")
         stl_btn = QPushButton("STL")
         cancel_btn = QPushButton("Cancel")
         
         format_msg.addButton(dxf_btn, QMessageBox.ActionRole)
         format_msg.addButton(step_btn, QMessageBox.ActionRole)
+        format_msg.addButton(obj_btn, QMessageBox.ActionRole)
         format_msg.addButton(stl_btn, QMessageBox.ActionRole)
         format_msg.addButton(cancel_btn, QMessageBox.RejectRole)
         
@@ -1295,6 +1297,13 @@ class GUIMethods:
             file_path, _ = QFileDialog.getSaveFileName(
                 self, "Save STEP as",
                 default_name, "STEP Files (*.step);;All Files (*)"
+            )
+        elif format_msg.clickedButton() == obj_btn:
+            # OBJ file dialog
+            default_name = f"{base_name}_{new_w}x{new_h}.obj"
+            file_path, _ = QFileDialog.getSaveFileName(
+                self, "Save OBJ as",
+                default_name, "OBJ Files (*.obj);;All Files (*)"
             )
         elif format_msg.clickedButton() == stl_btn:
             # STL file dialog
@@ -1369,11 +1378,38 @@ class GUIMethods:
                                                   f"STEP file exported successfully!\n\n"
                                                   f"File: {file_path}\n"
                                                   f"Extrusion height: {height}mm\n\n"
-                                                  f"This is a basic STEP format. For full compatibility, consider using a CAD library.")
+                                                  f"STEP file created using trimesh library - should work with most CAD software including SolidWorks.")
                         else:
                             QMessageBox.warning(self, "Export Failed", 
                                               "STEP export failed. Please try STL format instead.")
                     return
+                
+                elif format_msg.clickedButton() == obj_btn:
+                    # OBJ export path
+                    from methods.step_export import export_step_file
+                    
+                    # Ask for extrusion height with proper validation
+                    from PySide6.QtWidgets import QInputDialog
+                    height, ok = QInputDialog.getDouble(
+                        self, "Extrusion Height", 
+                        "Enter extrusion height in mm:", 
+                        value=1.0, decimals=1
+                    )
+                    
+                    if ok and height > 0:
+                        success = export_step_file(filtered_contours, file_path, self.current_mask.shape[:2], 
+                                                 effective_mm_per_px, extrude_height=height)
+                        if success:
+                            QMessageBox.information(self, "Success", 
+                                                  f"OBJ file exported successfully!\n\n"
+                                                  f"File: {file_path}\n"
+                                                  f"Extrusion height: {height}mm\n\n"
+                                                  f"OBJ files can be imported into most CAD software including SolidWorks.")
+                        else:
+                            QMessageBox.warning(self, "Export Failed", 
+                                              "OBJ export failed.")
+                    return
+                
                 
                 elif format_msg.clickedButton() == stl_btn:
                     # STL export path

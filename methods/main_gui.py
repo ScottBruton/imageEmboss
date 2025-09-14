@@ -51,6 +51,10 @@ class ImageEmbossGUI(QMainWindow, GUIMethods):
         # Background transparency
         self.background_transparency = 0  # Default opaque
         
+        # Locked settings for area processing
+        self.settings_locked = False
+        self.locked_params = None
+        
         # Default parameters
         self.params = {
             "bilateral_diameter": 9,
@@ -213,7 +217,7 @@ class ImageEmbossGUI(QMainWindow, GUIMethods):
         self.dxf_view = ImageGraphicsView()
         self.dxf_view.setMinimumSize(100, 100)  # Much smaller minimum
         self.dxf_view.image_dropped.connect(self.load_image_from_path)
-        self.dxf_view.area_process_requested.connect(self.process_area_for_edges)
+        self.dxf_view.area_process_requested.connect(self.on_area_process_requested)
         self.dxf_view.area_erase_requested.connect(self.erase_area_edges)
         self.dxf_view.merge_edges_requested.connect(self.merge_area_edges)
         dxf_layout.addWidget(self.dxf_view)
@@ -757,6 +761,31 @@ class ImageEmbossGUI(QMainWindow, GUIMethods):
         self.edit_button_group.addButton(self.area_process_btn, 5)
         layout.addWidget(self.area_process_btn)
         
+        # Area processing radius slider
+        radius_layout = QHBoxLayout()
+        radius_layout.setContentsMargins(0, 0, 0, 0)
+        
+        radius_label = QLabel("Radius:")
+        radius_label.setMaximumWidth(40)
+        radius_layout.addWidget(radius_label)
+        
+        self.radius_slider = QSlider(Qt.Horizontal)
+        self.radius_slider.setMinimum(10)
+        self.radius_slider.setMaximum(200)
+        self.radius_slider.setValue(50)
+        self.radius_slider.setMaximumWidth(100)
+        self.radius_slider.setToolTip("Adjust area processing radius")
+        self.radius_slider.valueChanged.connect(self.on_radius_changed)
+        radius_layout.addWidget(self.radius_slider)
+        
+        self.radius_value_label = QLabel("50")
+        self.radius_value_label.setMaximumWidth(30)
+        self.radius_value_label.setAlignment(Qt.AlignCenter)
+        radius_layout.addWidget(self.radius_value_label)
+        
+        radius_layout.addStretch()
+        layout.addLayout(radius_layout)
+        
         # Merge edges button
         self.merge_edges_btn = QPushButton("🔗")
         self.merge_edges_btn.setMaximumSize(25, 25)
@@ -765,6 +794,16 @@ class ImageEmbossGUI(QMainWindow, GUIMethods):
         self.merge_edges_btn.clicked.connect(lambda: self.set_edit_mode("merge_edges"))
         self.edit_button_group.addButton(self.merge_edges_btn, 6)
         layout.addWidget(self.merge_edges_btn)
+        
+        # Note: Merge edges uses the same radius slider as area processing
+        
+        # Lock settings button
+        self.lock_settings_btn = QPushButton("🔒")
+        self.lock_settings_btn.setMaximumSize(25, 25)
+        self.lock_settings_btn.setCheckable(True)
+        self.lock_settings_btn.setToolTip("Lock current edge detection settings for area processing")
+        self.lock_settings_btn.clicked.connect(self.toggle_settings_lock)
+        layout.addWidget(self.lock_settings_btn)
         
         layout.addSpacing(10)
         
@@ -780,3 +819,31 @@ class ImageEmbossGUI(QMainWindow, GUIMethods):
         layout.addStretch()  # Push everything to the left
         
         return toolbar
+    
+    def on_radius_changed(self, value):
+        """Handle radius slider changes"""
+        self.dxf_view.set_area_process_radius(value)
+        self.radius_value_label.setText(str(value))
+    
+    def on_area_process_requested(self, scene_point, radius):
+        """Handle area processing request with appropriate parameters"""
+        # Use locked parameters if available, otherwise use current parameters
+        params_to_use = self.locked_params if self.settings_locked and self.locked_params else None
+        self.process_area_for_edges(scene_point, radius, params_to_use)
+    
+    def toggle_settings_lock(self):
+        """Toggle the lock on current edge detection settings"""
+        if self.settings_locked:
+            # Unlock settings
+            self.settings_locked = False
+            self.locked_params = None
+            self.lock_settings_btn.setText("🔒")
+            self.lock_settings_btn.setToolTip("Lock current edge detection settings for area processing")
+            self.status_bar.showMessage("Settings unlocked - area processing will use current parameters")
+        else:
+            # Lock current settings
+            self.settings_locked = True
+            self.locked_params = self.params.copy()  # Make a copy of current parameters
+            self.lock_settings_btn.setText("🔓")
+            self.lock_settings_btn.setToolTip("Unlock settings - area processing will use current parameters")
+            self.status_bar.showMessage("Settings locked - area processing will use locked parameters")

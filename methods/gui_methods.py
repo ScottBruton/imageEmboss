@@ -579,7 +579,7 @@ class GUIMethods:
         if self.edit_mode in ["rectangle", "triangle", "circle"]:
             self.dxf_view.set_shape_type(shape_type)
     
-    def process_area_for_edges(self, scene_point, radius):
+    def process_area_for_edges(self, scene_point, radius, params=None):
         """Process a circular area for edge detection and add new contours"""
         if self.original_image is None:
             return
@@ -607,15 +607,23 @@ class GUIMethods:
         # Extract the rectangular area from the original image
         roi = self.original_image[y1:y2, x1:x2]
         
+        # Use provided parameters, locked parameters, or current parameters
+        if params is not None:
+            params_to_use = params
+        elif hasattr(self, 'locked_params') and self.locked_params:
+            params_to_use = self.locked_params
+        else:
+            params_to_use = self.params
+        
         # Process this area for edges using the same parameters
-        edges = find_edges_and_contours(roi, self.params)
+        edges = find_edges_and_contours(roi, params_to_use)
         
         # Find contours in this area
         area_contours = contours_from_mask(
             edges,
-            self.params["largest_n"],
-            self.params["simplify_pct"],
-            self.params["gap_threshold"]
+            params_to_use["largest_n"],
+            params_to_use["simplify_pct"],
+            params_to_use["gap_threshold"]
         )
         
         # Adjust contours back to full image coordinates
@@ -679,31 +687,104 @@ class GUIMethods:
         print(f"DEBUG: Existing mask pixels: {np.sum(existing_mask > 0)}")
         print(f"DEBUG: New mask pixels: {np.sum(new_mask > 0)}")
         
-        # Subtract new contours from existing contours
+        # Check for intersections between new contours and existing contours
+        # This is more robust than just mask subtraction
+        intersecting_existing = set()
+        
+        for i, existing_contour in enumerate(existing_contours):
+            for j, new_contour in enumerate(new_contours):
+                if self.contours_intersect_detailed(existing_contour, new_contour):
+                    intersecting_existing.add(i)
+                    print(f"DEBUG: New contour {j} intersects with existing contour {i}")
+                    break
+        
+        print(f"DEBUG: Found {len(intersecting_existing)} existing contours that intersect with new ones")
+        
+        # Create result list starting with non-intersecting existing contours
+        result_contours = []
+        for i, existing_contour in enumerate(existing_contours):
+            if i not in intersecting_existing:
+                result_contours.append(existing_contour)
+        
+        # For intersecting existing contours, subtract new contours and add remaining pieces
+        for i in intersecting_existing:
+            existing_contour = existing_contours[i]
+            remaining_pieces = self.subtract_new_from_existing(existing_contour, new_contours)
+            result_contours.extend(remaining_pieces)
+        
+        # Add all new contours
+        result_contours.extend(new_contours)
+        
+        print(f"DEBUG: Final result: {len(result_contours)} total contours")
+        
+        return result_contours
+
+    def contours_intersect_detailed(self, contour1, contour2):
+        """Check if two contours intersect using multiple methods"""
+        try:
+            # Method 1: Bounding rectangle intersection
+            rect1 = cv2.boundingRect(contour1)
+            rect2 = cv2.boundingRect(contour2)
+            
+            x1, y1, w1, h1 = rect1
+            x2, y2, w2, h2 = rect2
+            
+            if not (x1 < x2 + w2 and x1 + w1 > x2 and y1 < y2 + h2 and y1 + h1 > y2):
+                return False
+            
+            # Method 2: Sample points from contour2 and check if inside contour1
+            # Only check every 5th point to avoid too many checks
+            for i in range(0, len(contour2), 5):
+                point = contour2[i]
+                x, y = point[0]
+                # Ensure coordinates are integers and valid
+                x, y = int(float(x)), int(float(y))
+                if cv2.pointPolygonTest(contour1, (x, y), False) >= 0:
+                    return True
+            
+            # Method 3: Sample points from contour1 and check if inside contour2
+            for i in range(0, len(contour1), 5):
+                point = contour1[i]
+                x, y = point[0]
+                # Ensure coordinates are integers and valid
+                x, y = int(float(x)), int(float(y))
+                if cv2.pointPolygonTest(contour2, (x, y), False) >= 0:
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            print(f"DEBUG: Error in contours_intersect_detailed: {e}")
+            # Fallback to simple bounding rectangle check
+            return True
+
+    def subtract_new_from_existing(self, existing_contour, new_contours):
+        """Subtract new contours from an existing contour and return remaining pieces"""
+        h, w = self.original_image.shape[:2]
+        
+        # Create mask for existing contour
+        existing_mask = np.zeros((h, w), dtype=np.uint8)
+        cv2.fillPoly(existing_mask, [existing_contour], 255)
+        
+        # Create mask for new contours
+        new_mask = np.zeros((h, w), dtype=np.uint8)
+        for new_contour in new_contours:
+            cv2.fillPoly(new_mask, [new_contour], 255)
+        
+        # Subtract new contours from existing contour
         remaining_mask = cv2.bitwise_and(existing_mask, cv2.bitwise_not(new_mask))
         
-        print(f"DEBUG: Remaining mask pixels: {np.sum(remaining_mask > 0)}")
-        
-        # Find remaining contours from existing ones
+        # Find remaining contours
         remaining_contours, _ = cv2.findContours(remaining_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
-        print(f"DEBUG: Found {len(remaining_contours)} remaining contours")
-        
-        # Filter out tiny remaining pieces
+        # Filter out tiny pieces
         filtered_remaining = []
         for contour in remaining_contours:
             area = cv2.contourArea(contour)
             if area > 50:  # Only keep significant remaining pieces
                 filtered_remaining.append(contour)
         
-        print(f"DEBUG: Filtered to {len(filtered_remaining)} significant remaining contours")
-        
-        # Combine remaining contours with new contours
-        result_contours = filtered_remaining + new_contours
-        
-        print(f"DEBUG: Final result: {len(result_contours)} total contours")
-        
-        return result_contours
+        return filtered_remaining
 
 
     def erase_area_edges(self, scene_point, radius):

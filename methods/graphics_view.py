@@ -89,7 +89,11 @@ class ImageGraphicsView(QGraphicsView):
         
         # Area processing radius
         self.area_process_radius = 50
-        self.area_process_circle = None  # Visual indicator circle
+        self.area_process_circle = None
+        self.area_process_dragging = False
+        self.area_erase_dragging = False
+        self.last_process_point = None
+        self.last_erase_point = None  # Visual indicator circle
         
         # Shape drawing variables
         self.shape_start_point = QPointF()
@@ -181,6 +185,10 @@ class ImageGraphicsView(QGraphicsView):
                 # Show the processing circle
                 self.show_area_process_circle(scene_point)
                 
+                # Start dragging for continuous edge detection
+                self.area_process_dragging = True
+                self.last_process_point = scene_point
+                
                 # Process area for edge detection
                 print("DEBUG: Left button clicked - processing area")
                 self.area_process_requested.emit(scene_point, self.area_process_radius)
@@ -204,6 +212,10 @@ class ImageGraphicsView(QGraphicsView):
                 
                 # Show the processing circle
                 self.show_area_process_circle(scene_point)
+                
+                # Start dragging for continuous erasing
+                self.area_erase_dragging = True
+                self.last_erase_point = scene_point
                 
                 # Erase edges in area
                 print("DEBUG: Right button clicked - erasing area")
@@ -241,6 +253,34 @@ class ImageGraphicsView(QGraphicsView):
         elif self.edit_mode in ["area_process", "merge_edges"]:
             # Update the radius circle position
             self.show_area_process_circle(scene_point)
+            
+            # If dragging in area_process mode, continuously process edges
+            if self.edit_mode == "area_process" and self.area_process_dragging:
+                # Only process if we've moved a significant distance (avoid too many calls)
+                if self.last_process_point is None:
+                    distance = float('inf')
+                else:
+                    distance = ((scene_point.x() - self.last_process_point.x())**2 + 
+                              (scene_point.y() - self.last_process_point.y())**2)**0.5
+                
+                if distance > 20:  # Process every 20 pixels of movement
+                    print(f"DEBUG: Dragging - processing area at {scene_point}")
+                    self.area_process_requested.emit(scene_point, self.area_process_radius)
+                    self.last_process_point = scene_point
+            
+            # If dragging in area_process mode for erasing, continuously erase edges
+            if self.edit_mode == "area_process" and self.area_erase_dragging:
+                # Only erase if we've moved a significant distance
+                if self.last_erase_point is None:
+                    distance = float('inf')
+                else:
+                    distance = ((scene_point.x() - self.last_erase_point.x())**2 + 
+                              (scene_point.y() - self.last_erase_point.y())**2)**0.5
+                
+                if distance > 20:  # Erase every 20 pixels of movement
+                    print(f"DEBUG: Dragging - erasing area at {scene_point}")
+                    self.area_erase_requested.emit(scene_point, self.area_process_radius)
+                    self.last_erase_point = scene_point
         elif self.drawing:
             # Update drawing
             self.update_drawing(scene_point)
@@ -261,6 +301,17 @@ class ImageGraphicsView(QGraphicsView):
             elif self.drawing:
                 # Finish drawing
                 self.finish_drawing(scene_point)
+            elif self.edit_mode == "area_process" and self.area_process_dragging:
+                # Stop dragging for area processing
+                print("DEBUG: Mouse released - stopping area process dragging")
+                self.area_process_dragging = False
+                self.last_process_point = None
+        elif event.button() == Qt.RightButton:
+            if self.edit_mode == "area_process" and self.area_erase_dragging:
+                # Stop dragging for area erasing
+                print("DEBUG: Right mouse released - stopping area erase dragging")
+                self.area_erase_dragging = False
+                self.last_erase_point = None
         elif event.button() == Qt.MiddleButton:
             # Middle mouse button release
             if self.middle_mouse_panning:
@@ -269,6 +320,7 @@ class ImageGraphicsView(QGraphicsView):
                 self._restore_cursor_for_mode()
         
         super().mouseReleaseEvent(event)
+    
     
     def reset_view(self):
         """Reset zoom and pan to fit view (1:1 fit)"""
@@ -351,6 +403,11 @@ class ImageGraphicsView(QGraphicsView):
         else:
             # Hide the area process circle when switching to other modes
             self.hide_area_process_circle()
+            # Reset dragging flags
+            self.area_process_dragging = False
+            self.area_erase_dragging = False
+            self.last_process_point = None
+            self.last_erase_point = None
     
     def set_shape_type(self, shape_type):
         """Set the shape type for shape drawing"""
@@ -359,6 +416,14 @@ class ImageGraphicsView(QGraphicsView):
     def set_area_process_radius(self, radius):
         """Set the radius for area processing"""
         self.area_process_radius = radius
+        
+        # Update the circle visualization if it's currently visible
+        if self.area_process_circle and self.edit_mode in ["area_process", "merge_edges"]:
+            # Get the current center point of the circle
+            rect = self.area_process_circle.rect()
+            current_center = QPointF(rect.center().x(), rect.center().y())
+            # Update the circle with new radius
+            self.show_area_process_circle(current_center)
     
     def show_area_process_circle(self, center_point):
         """Show a circle indicating the area processing radius"""

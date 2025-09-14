@@ -1253,7 +1253,7 @@ class GUIMethods:
         return contours
     
     def export_dxf(self):
-        """Export the DXF file"""
+        """Export the DXF or STEP file"""
         if self.image_path is None:
             QMessageBox.warning(self, "Warning", "No image loaded.")
             return
@@ -1261,16 +1261,55 @@ class GUIMethods:
         # Get export scale
         export_scale = self.export_scale_input.value()
         
-        # Get file path
+        # First ask user to choose format
+        from PySide6.QtWidgets import QMessageBox, QPushButton
+        
+        format_msg = QMessageBox()
+        format_msg.setWindowTitle("Export Format")
+        format_msg.setText("Choose export format:")
+        format_msg.setInformativeText("DXF: 2D vector format\nSTEP: 3D extruded geometry (STEP format)\nSTL: 3D mesh format (widely supported)")
+        
+        dxf_btn = QPushButton("DXF")
+        step_btn = QPushButton("STEP")
+        stl_btn = QPushButton("STL")
+        cancel_btn = QPushButton("Cancel")
+        
+        format_msg.addButton(dxf_btn, QMessageBox.ActionRole)
+        format_msg.addButton(step_btn, QMessageBox.ActionRole)
+        format_msg.addButton(stl_btn, QMessageBox.ActionRole)
+        format_msg.addButton(cancel_btn, QMessageBox.RejectRole)
+        
+        format_result = format_msg.exec()
+        
+        if format_result == QMessageBox.RejectRole:  # Cancel
+            return
+        
+        # Get file path based on chosen format
         h, w = self.original_image.shape[:2]
         new_h, new_w = int(h * export_scale), int(w * export_scale)
         base_name = os.path.splitext(os.path.basename(self.image_path))[0]
-        default_name = f"{base_name}_{new_w}x{new_h}.dxf"
         
-        file_path, _ = QFileDialog.getSaveFileName(
-            self, "Save DXF as",
-            default_name, "AutoCAD DXF (*.dxf)"
-        )
+        if format_msg.clickedButton() == step_btn:
+            # STEP file dialog
+            default_name = f"{base_name}_{new_w}x{new_h}.step"
+            file_path, _ = QFileDialog.getSaveFileName(
+                self, "Save STEP as",
+                default_name, "STEP Files (*.step);;All Files (*)"
+            )
+        elif format_msg.clickedButton() == stl_btn:
+            # STL file dialog
+            default_name = f"{base_name}_{new_w}x{new_h}.stl"
+            file_path, _ = QFileDialog.getSaveFileName(
+                self, "Save STL as",
+                default_name, "STL Files (*.stl);;All Files (*)"
+            )
+        else:
+            # DXF file dialog
+            default_name = f"{base_name}_{new_w}x{new_h}.dxf"
+            file_path, _ = QFileDialog.getSaveFileName(
+                self, "Save DXF as",
+                default_name, "AutoCAD DXF (*.dxf)"
+            )
         
         if file_path:
             try:
@@ -1309,66 +1348,119 @@ class GUIMethods:
                 # Calculate effective mm_per_px
                 effective_mm_per_px = self.params["mm_per_px"] / export_scale
                 
-                # Ask user which version to export
-                from PySide6.QtWidgets import QMessageBox, QPushButton
-                
-                msg = QMessageBox()
-                msg.setWindowTitle("Export DXF")
-                msg.setText("Choose export version:")
-                msg.setInformativeText("Original: Full detail with all vertices\nLightweight: Simplified with splines (recommended)")
-                
-                original_btn = QPushButton("Original")
-                lightweight_btn = QPushButton("Lightweight")
-                both_btn = QPushButton("Both")
-                cancel_btn = QPushButton("Cancel")
-                
-                msg.addButton(original_btn, QMessageBox.ActionRole)
-                msg.addButton(lightweight_btn, QMessageBox.ActionRole)
-                msg.addButton(both_btn, QMessageBox.ActionRole)
-                msg.addButton(cancel_btn, QMessageBox.RejectRole)
-                
-                result = msg.exec()
-                
-                if result == QMessageBox.RejectRole:  # Cancel
+                # Handle export based on format choice from earlier
+                if format_msg.clickedButton() == step_btn:
+                    # STEP export path
+                    from methods.step_export import export_step_file
+                    
+                    # Ask for extrusion height with proper validation
+                    from PySide6.QtWidgets import QInputDialog
+                    height, ok = QInputDialog.getDouble(
+                        self, "Extrusion Height", 
+                        "Enter extrusion height in mm:", 
+                        value=1.0, decimals=1
+                    )
+                    
+                    if ok and height > 0:
+                        success = export_step_file(filtered_contours, file_path, self.current_mask.shape[:2], 
+                                                 effective_mm_per_px, extrude_height=height)
+                        if success:
+                            QMessageBox.information(self, "Success", 
+                                                  f"STEP file exported successfully!\n\n"
+                                                  f"File: {file_path}\n"
+                                                  f"Extrusion height: {height}mm\n\n"
+                                                  f"This is a basic STEP format. For full compatibility, consider using a CAD library.")
+                        else:
+                            QMessageBox.warning(self, "Export Failed", 
+                                              "STEP export failed. Please try STL format instead.")
                     return
                 
-                # Export based on user choice
-                exported_files = []
+                elif format_msg.clickedButton() == stl_btn:
+                    # STL export path
+                    from methods.step_export import export_step_file_simple
+                    
+                    # Ask for extrusion height with proper validation
+                    from PySide6.QtWidgets import QInputDialog
+                    height, ok = QInputDialog.getDouble(
+                        self, "Extrusion Height", 
+                        "Enter extrusion height in mm:", 
+                        value=1.0, decimals=1
+                    )
+                    
+                    if ok and height > 0:
+                        success = export_step_file_simple(filtered_contours, file_path, self.current_mask.shape[:2], 
+                                                        effective_mm_per_px, extrude_height=height)
+                        if success:
+                            QMessageBox.information(self, "Success", 
+                                                  f"STL file exported successfully!\n\n"
+                                                  f"File: {file_path}\n"
+                                                  f"Extrusion height: {height}mm\n\n"
+                                                  f"STL files can be imported into most CAD software including SolidWorks.")
+                        else:
+                            QMessageBox.warning(self, "Export Failed", 
+                                              "STL export failed.")
+                    return
                 
-                if msg.clickedButton() == original_btn:
-                    # Export original version
-                    export_dxf(filtered_contours, file_path, self.current_mask.shape[:2], 
-                              effective_mm_per_px)
-                    exported_files.append(file_path)
+                else:  # DXF export path
+                    # Ask for DXF version
+                    dxf_msg = QMessageBox()
+                    dxf_msg.setWindowTitle("DXF Export Options")
+                    dxf_msg.setText("Choose DXF version:")
+                    dxf_msg.setInformativeText("Original: Full detail with all vertices\nLightweight: Simplified with splines (recommended)")
                     
-                elif msg.clickedButton() == lightweight_btn:
-                    # Export lightweight version (creates multiple files)
-                    from methods.helpers import export_dxf_lightweight
-                    lightweight_files = export_dxf_lightweight(filtered_contours, file_path, self.current_mask.shape[:2], 
-                                         effective_mm_per_px, simplify_factor=0.01, min_distance=0.1)
-                    exported_files.extend(lightweight_files)
+                    original_btn = QPushButton("Original")
+                    lightweight_btn = QPushButton("Lightweight")
+                    both_btn = QPushButton("Both")
+                    cancel_btn = QPushButton("Cancel")
                     
-                elif msg.clickedButton() == both_btn:
-                    # Export both versions
-                    from methods.helpers import export_dxf_lightweight
+                    dxf_msg.addButton(original_btn, QMessageBox.ActionRole)
+                    dxf_msg.addButton(lightweight_btn, QMessageBox.ActionRole)
+                    dxf_msg.addButton(both_btn, QMessageBox.ActionRole)
+                    dxf_msg.addButton(cancel_btn, QMessageBox.RejectRole)
                     
-                    # Original version
-                    export_dxf(filtered_contours, file_path, self.current_mask.shape[:2], 
-                              effective_mm_per_px)
-                    exported_files.append(file_path)
+                    dxf_result = dxf_msg.exec()
                     
-                    # Lightweight version (creates multiple files)
-                    base_path = file_path.rsplit('.', 1)[0]
-                    lightweight_path = f"{base_path}_lightweight.dxf"
-                    lightweight_files = export_dxf_lightweight(filtered_contours, lightweight_path, self.current_mask.shape[:2], 
-                                         effective_mm_per_px, simplify_factor=0.01, min_distance=0.1)
-                    exported_files.extend(lightweight_files)
-                
-                # Show DXF viewer dialog
-                if exported_files:
-                    from methods.dxf_viewer_dialog import DXFViewerDialog
-                    viewer_dialog = DXFViewerDialog(exported_files, self)
-                    viewer_dialog.exec()
+                    if dxf_result == QMessageBox.RejectRole:  # Cancel
+                        return
+                    
+                    # Export based on DXF choice
+                    exported_files = []
+                    
+                    if dxf_msg.clickedButton() == original_btn:
+                        # Export original version
+                        from methods.helpers import export_dxf
+                        export_dxf(filtered_contours, file_path, self.current_mask.shape[:2], 
+                                  effective_mm_per_px)
+                        exported_files.append(file_path)
+                        
+                    elif dxf_msg.clickedButton() == lightweight_btn:
+                        # Export lightweight version (creates multiple files)
+                        from methods.helpers import export_dxf_lightweight
+                        lightweight_files = export_dxf_lightweight(filtered_contours, file_path, self.current_mask.shape[:2], 
+                                             effective_mm_per_px, simplify_factor=0.01, min_distance=0.1)
+                        exported_files.extend(lightweight_files)
+                        
+                    elif dxf_msg.clickedButton() == both_btn:
+                        # Export both versions
+                        from methods.helpers import export_dxf, export_dxf_lightweight
+                        
+                        # Original version
+                        export_dxf(filtered_contours, file_path, self.current_mask.shape[:2], 
+                                  effective_mm_per_px)
+                        exported_files.append(file_path)
+                        
+                        # Lightweight version (creates multiple files)
+                        base_path = file_path.rsplit('.', 1)[0]
+                        lightweight_path = f"{base_path}_lightweight.dxf"
+                        lightweight_files = export_dxf_lightweight(filtered_contours, lightweight_path, self.current_mask.shape[:2], 
+                                             effective_mm_per_px, simplify_factor=0.01, min_distance=0.1)
+                        exported_files.extend(lightweight_files)
+                    
+                    # Show DXF viewer dialog
+                    if exported_files:
+                        from methods.dxf_viewer_dialog import DXFViewerDialog
+                        viewer_dialog = DXFViewerDialog(exported_files, self)
+                        viewer_dialog.exec()
                 
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Export failed: {str(e)}")

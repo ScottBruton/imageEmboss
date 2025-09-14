@@ -747,8 +747,8 @@ class ImageEmbossGUI(QMainWindow, GUIMethods):
         layout.addWidget(self.output_size_label)
         
         # Export button
-        self.export_button = QPushButton("Export DXF")
-        self.export_button.setToolTip("Export the processed image as a DXF file")
+        self.export_button = QPushButton("Export")
+        self.export_button.setToolTip("Export the processed image as DXF or STEP file")
         self.export_button.clicked.connect(self.export_dxf)
         layout.addWidget(self.export_button)
         

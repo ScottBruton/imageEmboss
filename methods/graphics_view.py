@@ -29,7 +29,9 @@ class ImageGraphicsView(QGraphicsView):
     zoom_out_requested = Signal()
     
     # Signal for area processing
-    area_process_requested = Signal(QPointF, int)  # point, radius
+    area_process_requested = Signal(QPointF, int)
+    area_erase_requested = Signal(QPointF, int)
+    merge_edges_requested = Signal(QPointF, int)  # point, radius
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -173,18 +175,42 @@ class ImageGraphicsView(QGraphicsView):
             elif self.edit_mode == "eraser":
                 self.erase_at_point(scene_point)
             elif self.edit_mode == "area_process":
-                print(f"DEBUG: Area process clicked at {scene_point}")
+                print(f"DEBUG: Area process left-clicked at {scene_point}")
                 print(f"DEBUG: Emitting signal with radius {self.area_process_radius}")
                 
                 # Show the processing circle
                 self.show_area_process_circle(scene_point)
                 
                 # Process area for edge detection
+                print("DEBUG: Left button clicked - processing area")
                 self.area_process_requested.emit(scene_point, self.area_process_radius)
                 print("DEBUG: Signal emitted")
+            elif self.edit_mode == "merge_edges":
+                print(f"DEBUG: Merge edges left-clicked at {scene_point}")
+                # Show the processing circle
+                self.show_area_process_circle(scene_point)
+                
+                # Merge edges in area
+                self.merge_edges_requested.emit(scene_point, self.area_process_radius)
+                print("DEBUG: Merge signal emitted")
             else:
                 # Start drawing
                 self.start_drawing(scene_point)
+        elif event.button() == Qt.RightButton:
+            print(f"DEBUG: Right button clicked in mode: {self.edit_mode}")
+            if self.edit_mode == "area_process":
+                print(f"DEBUG: Area process right-clicked at {scene_point}")
+                print(f"DEBUG: Emitting erase signal with radius {self.area_process_radius}")
+                
+                # Show the processing circle
+                self.show_area_process_circle(scene_point)
+                
+                # Erase edges in area
+                print("DEBUG: Right button clicked - erasing area")
+                self.area_erase_requested.emit(scene_point, self.area_process_radius)
+                print("DEBUG: Erase signal emitted")
+            else:
+                print(f"DEBUG: Right-click not handled for mode: {self.edit_mode}")
         elif event.button() == Qt.MiddleButton:
             # Middle mouse button for panning (works in any mode)
             self.pan_start = event.position().toPoint()
@@ -212,7 +238,7 @@ class ImageGraphicsView(QGraphicsView):
             self.verticalScrollBar().setValue(
                 self.verticalScrollBar().value() - delta.y())
             self.pan_start = event.position().toPoint()
-        elif self.edit_mode == "area_process":
+        elif self.edit_mode in ["area_process", "merge_edges"]:
             # Update the radius circle position
             self.show_area_process_circle(scene_point)
         elif self.drawing:
@@ -305,6 +331,23 @@ class ImageGraphicsView(QGraphicsView):
             # Use a brush cursor for edge drawing mode
             self.setCursor(Qt.CrossCursor)
             self.setDragMode(QGraphicsView.NoDrag)
+        elif mode == "merge_edges":
+            print("DEBUG: Setting merge_edges mode with circle cursor")
+            # Use a custom circle cursor for merge edges mode
+            cursor_pixmap = QPixmap(32, 32)
+            cursor_pixmap.fill(Qt.transparent)
+            painter = QPainter(cursor_pixmap)
+            painter.setPen(QPen(Qt.blue, 2))
+            painter.drawEllipse(2, 2, 28, 28)
+            painter.end()
+            cursor = QCursor(cursor_pixmap, 16, 16)
+            self.setCursor(cursor)
+            self.setDragMode(QGraphicsView.NoDrag)
+            print("DEBUG: Blue circle cursor set for merge")
+            
+            # Show the radius circle at the center of the view
+            center = self.mapToScene(self.viewport().rect().center())
+            self.show_area_process_circle(center)
         else:
             # Hide the area process circle when switching to other modes
             self.hide_area_process_circle()

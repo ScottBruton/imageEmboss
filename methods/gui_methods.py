@@ -636,8 +636,12 @@ class GUIMethods:
         
         # Add new contours to existing ones with intersection handling
         if filtered_contours:
+            print(f"DEBUG: Before intersection handling - existing: {len(self.current_contours)}, new: {len(filtered_contours)}")
+            
             # Check for intersections and break up existing contours
             self.current_contours = self.handle_contour_intersections(self.current_contours, filtered_contours)
+            
+            print(f"DEBUG: After intersection handling - total: {len(self.current_contours)}")
             
             # Refresh the preview
             self.display_dxf_preview()
@@ -649,82 +653,212 @@ class GUIMethods:
 
     def handle_contour_intersections(self, existing_contours, new_contours):
         """Handle intersections between existing and new contours"""
-        result_contours = []
+        print(f"DEBUG: handle_contour_intersections called with {len(existing_contours)} existing, {len(new_contours)} new")
         
-        for existing_contour in existing_contours:
-            # Check if any new contour intersects with this existing contour
-            intersects = False
-            for new_contour in new_contours:
-                if self.contours_intersect(existing_contour, new_contour):
-                    intersects = True
-                    break
-            
-            if intersects:
-                # Break up the existing contour by subtracting new contours
-                broken_contours = self.break_contour_with_new(existing_contour, new_contours)
-                result_contours.extend(broken_contours)
-            else:
-                # Keep the existing contour as is
-                result_contours.append(existing_contour)
+        if not existing_contours:
+            print("DEBUG: No existing contours, returning new contours")
+            return new_contours
         
-        # Add all new contours
-        result_contours.extend(new_contours)
+        if not new_contours:
+            print("DEBUG: No new contours, returning existing contours")
+            return existing_contours
         
-        return result_contours
-
-    def contours_intersect(self, contour1, contour2):
-        """Check if two contours intersect"""
-        # Create bounding rectangles for quick intersection check
-        rect1 = cv2.boundingRect(contour1)
-        rect2 = cv2.boundingRect(contour2)
-        
-        # Check if bounding rectangles intersect
-        x1, y1, w1, h1 = rect1
-        x2, y2, w2, h2 = rect2
-        
-        if (x1 < x2 + w2 and x1 + w1 > x2 and y1 < y2 + h2 and y1 + h1 > y2):
-            # Bounding rectangles intersect, do more detailed check
-            # Create masks for both contours
-            h, w = self.original_image.shape[:2]
-            mask1 = np.zeros((h, w), dtype=np.uint8)
-            mask2 = np.zeros((h, w), dtype=np.uint8)
-            
-            cv2.fillPoly(mask1, [contour1], 255)
-            cv2.fillPoly(mask2, [contour2], 255)
-            
-            # Check if masks overlap
-            intersection = cv2.bitwise_and(mask1, mask2)
-            return np.any(intersection > 0)
-        
-        return False
-
-    def break_contour_with_new(self, existing_contour, new_contours):
-        """Break up an existing contour by subtracting new contours"""
         h, w = self.original_image.shape[:2]
+        print(f"DEBUG: Image dimensions: {w}x{h}")
         
-        # Create mask for existing contour
+        # Create a combined mask from all existing contours
         existing_mask = np.zeros((h, w), dtype=np.uint8)
-        cv2.fillPoly(existing_mask, [existing_contour], 255)
+        for contour in existing_contours:
+            cv2.fillPoly(existing_mask, [contour], 255)
         
-        # Create mask for new contours
+        # Create a combined mask from all new contours
         new_mask = np.zeros((h, w), dtype=np.uint8)
-        for new_contour in new_contours:
-            cv2.fillPoly(new_mask, [new_contour], 255)
+        for contour in new_contours:
+            cv2.fillPoly(new_mask, [contour], 255)
         
-        # Subtract new contours from existing contour
-        result_mask = cv2.bitwise_and(existing_mask, cv2.bitwise_not(new_mask))
+        print(f"DEBUG: Existing mask pixels: {np.sum(existing_mask > 0)}")
+        print(f"DEBUG: New mask pixels: {np.sum(new_mask > 0)}")
         
-        # Find remaining contours
-        remaining_contours, _ = cv2.findContours(result_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        # Subtract new contours from existing contours
+        remaining_mask = cv2.bitwise_and(existing_mask, cv2.bitwise_not(new_mask))
         
-        # Filter out tiny contours
+        print(f"DEBUG: Remaining mask pixels: {np.sum(remaining_mask > 0)}")
+        
+        # Find remaining contours from existing ones
+        remaining_contours, _ = cv2.findContours(remaining_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        print(f"DEBUG: Found {len(remaining_contours)} remaining contours")
+        
+        # Filter out tiny remaining pieces
         filtered_remaining = []
         for contour in remaining_contours:
             area = cv2.contourArea(contour)
             if area > 50:  # Only keep significant remaining pieces
                 filtered_remaining.append(contour)
         
-        return filtered_remaining
+        print(f"DEBUG: Filtered to {len(filtered_remaining)} significant remaining contours")
+        
+        # Combine remaining contours with new contours
+        result_contours = filtered_remaining + new_contours
+        
+        print(f"DEBUG: Final result: {len(result_contours)} total contours")
+        
+        return result_contours
+
+
+    def erase_area_edges(self, scene_point, radius):
+        """Erase edges within the specified circular area"""
+        print(f"DEBUG: *** ERASE METHOD CALLED *** at {scene_point} with radius {radius}")
+        
+        if not self.dxf_view.image_item:
+            print("DEBUG: No image item found for erasing, returning")
+            return
+        
+        # Transform scene coordinates to image coordinates
+        image_rect = self.dxf_view.image_item.boundingRect()
+        scene_x = scene_point.x()
+        scene_y = scene_point.y()
+        
+        # Convert to image coordinates
+        image_x = int((scene_x - image_rect.x()) * self.original_image.shape[1] / image_rect.width())
+        image_y = int((scene_y - image_rect.y()) * self.original_image.shape[0] / image_rect.height())
+        
+        # Clamp to image bounds
+        image_x = max(0, min(image_x, self.original_image.shape[1] - 1))
+        image_y = max(0, min(image_y, self.original_image.shape[0] - 1))
+        
+        # Create circular mask for erasing
+        h, w = self.original_image.shape[:2]
+        mask = np.zeros((h, w), dtype=np.uint8)
+        cv2.circle(mask, (image_x, image_y), radius, 255, -1)
+        
+        # Find contours that intersect with the erase area
+        contours_to_remove = []
+        remaining_contours = []
+        
+        for contour in self.current_contours:
+            # Check if contour intersects with erase area
+            contour_mask = np.zeros((h, w), dtype=np.uint8)
+            cv2.fillPoly(contour_mask, [contour], 255)
+            
+            # Check intersection
+            intersection = cv2.bitwise_and(contour_mask, mask)
+            if np.any(intersection > 0):
+                # Contour intersects with erase area
+                # Subtract the erase area from the contour
+                remaining_mask = cv2.bitwise_and(contour_mask, cv2.bitwise_not(mask))
+                
+                # Find remaining contours
+                remaining_parts, _ = cv2.findContours(remaining_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                
+                # Add significant remaining parts
+                for part in remaining_parts:
+                    area = cv2.contourArea(part)
+                    if area > 50:  # Only keep significant parts
+                        remaining_contours.append(part)
+            else:
+                # Contour doesn't intersect, keep it
+                remaining_contours.append(contour)
+        
+        # Update contours
+        self.current_contours = remaining_contours
+        
+        # Refresh the preview
+        self.display_dxf_preview()
+        
+        # Show status message
+        erased_count = len(contours_to_remove)
+        self.status_bar.showMessage(f"Erased {erased_count} contours in the selected area")
+
+    def merge_area_edges(self, scene_point, radius):
+        """Merge nearby contours within the specified circular area"""
+        print(f"DEBUG: *** MERGE METHOD CALLED *** at {scene_point} with radius {radius}")
+        
+        if not self.dxf_view.image_item:
+            print("DEBUG: No image item found for merging, returning")
+            return
+        
+        # Transform scene coordinates to image coordinates
+        image_rect = self.dxf_view.image_item.boundingRect()
+        scene_x = scene_point.x()
+        scene_y = scene_point.y()
+        
+        # Convert to image coordinates
+        image_x = int((scene_x - image_rect.x()) * self.original_image.shape[1] / image_rect.width())
+        image_y = int((scene_y - image_rect.y()) * self.original_image.shape[0] / image_rect.height())
+        
+        # Clamp to image bounds
+        image_x = max(0, min(image_x, self.original_image.shape[1] - 1))
+        image_y = max(0, min(image_y, self.original_image.shape[0] - 1))
+        
+        print(f"DEBUG: Image coordinates: ({image_x}, {image_y})")
+        print(f"DEBUG: Current contours count: {len(self.current_contours)}")
+        
+        # Find contours that are within the merge area
+        contours_in_area = []
+        remaining_contours = []
+        
+        for i, contour in enumerate(self.current_contours):
+            # Check if contour center or any point is within the merge circle
+            # Get contour center
+            M = cv2.moments(contour)
+            if M["m00"] != 0:
+                cx = int(M["m10"] / M["m00"])
+                cy = int(M["m01"] / M["m00"])
+                
+                # Check if center is within merge circle
+                distance = np.sqrt((cx - image_x)**2 + (cy - image_y)**2)
+                if distance <= radius:
+                    contours_in_area.append(contour)
+                    print(f"DEBUG: Contour {i} center ({cx}, {cy}) is within merge area (distance: {distance})")
+                else:
+                    remaining_contours.append(contour)
+            else:
+                remaining_contours.append(contour)
+        
+        print(f"DEBUG: Found {len(contours_in_area)} contours in merge area")
+        
+        if len(contours_in_area) > 1:
+            # Merge the contours in the area
+            merged_contour = self.merge_contours(contours_in_area)
+            if merged_contour is not None:
+                remaining_contours.append(merged_contour)
+                self.current_contours = remaining_contours
+                
+                # Refresh the preview
+                self.display_dxf_preview()
+                
+                # Show status message
+                self.status_bar.showMessage(f"Merged {len(contours_in_area)} contours into 1")
+                print(f"DEBUG: Successfully merged {len(contours_in_area)} contours")
+            else:
+                self.status_bar.showMessage("Could not merge contours")
+                print("DEBUG: Failed to merge contours")
+        else:
+            self.status_bar.showMessage("Need at least 2 contours to merge")
+            print("DEBUG: Not enough contours to merge")
+
+    def merge_contours(self, contours):
+        """Merge multiple contours into one"""
+        if len(contours) < 2:
+            return contours[0] if contours else None
+        
+        # Create a combined mask from all contours
+        h, w = self.original_image.shape[:2]
+        combined_mask = np.zeros((h, w), dtype=np.uint8)
+        
+        for contour in contours:
+            cv2.fillPoly(combined_mask, [contour], 255)
+        
+        # Find the outer contour of the combined shape
+        merged_contours, _ = cv2.findContours(combined_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        if merged_contours:
+            # Return the largest contour
+            largest_contour = max(merged_contours, key=cv2.contourArea)
+            return largest_contour
+        
+        return None
 
     def convert_drawing_items_to_contours(self):
         """Convert drawing items to contours for DXF export"""

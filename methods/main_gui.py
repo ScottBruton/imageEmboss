@@ -214,6 +214,8 @@ class ImageEmbossGUI(QMainWindow, GUIMethods):
         self.dxf_view.setMinimumSize(100, 100)  # Much smaller minimum
         self.dxf_view.image_dropped.connect(self.load_image_from_path)
         self.dxf_view.area_process_requested.connect(self.process_area_for_edges)
+        self.dxf_view.area_erase_requested.connect(self.erase_area_edges)
+        self.dxf_view.merge_edges_requested.connect(self.merge_area_edges)
         dxf_layout.addWidget(self.dxf_view)
         
         layout.addWidget(dxf_group, 1)  # Takes all remaining space
@@ -750,10 +752,19 @@ class ImageEmbossGUI(QMainWindow, GUIMethods):
         self.area_process_btn = QPushButton("🎯")
         self.area_process_btn.setMaximumSize(25, 25)
         self.area_process_btn.setCheckable(True)
-        self.area_process_btn.setToolTip("Process area for edges")
+        self.area_process_btn.setToolTip("Process area for edges (Left-click: find, Right-click: erase)")
         self.area_process_btn.clicked.connect(lambda: self.set_edit_mode("area_process"))
         self.edit_button_group.addButton(self.area_process_btn, 5)
         layout.addWidget(self.area_process_btn)
+        
+        # Merge edges button
+        self.merge_edges_btn = QPushButton("🔗")
+        self.merge_edges_btn.setMaximumSize(25, 25)
+        self.merge_edges_btn.setCheckable(True)
+        self.merge_edges_btn.setToolTip("Merge nearby contours")
+        self.merge_edges_btn.clicked.connect(lambda: self.set_edit_mode("merge_edges"))
+        self.edit_button_group.addButton(self.merge_edges_btn, 6)
+        layout.addWidget(self.merge_edges_btn)
         
         layout.addSpacing(10)
         

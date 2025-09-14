@@ -58,7 +58,7 @@ class GUIMethods:
         if file_path:
             self.load_image_from_path(file_path)
     
-    def load_image_from_path(self, path):
+    def load_image_from_path(self, path, skip_edge_processing=False):
         """Load image from a given path"""
         self.image_path = path
         self.original_image = cv2.imread(path, cv2.IMREAD_COLOR)
@@ -67,10 +67,11 @@ class GUIMethods:
         self.dxf_view.clear_undo_redo_stacks()
         
         if self.original_image is not None:
-            # Reset edit state for new image
-            self.edited_contours = []
-            self.erased_contours = set()
-            self.erased_points = set()
+            # Reset edit state for new image (only if not loading project)
+            if not skip_edge_processing:
+                self.edited_contours = []
+                self.erased_contours = set()
+                self.erased_points = set()
             self.edit_mode = "view"
             
             # Clear drawing items
@@ -94,8 +95,9 @@ class GUIMethods:
             # Display original image
             self.display_original_image()
             
-            # Update preview
-            self.update_preview()
+            # Update preview (only if not skipping edge processing)
+            if not skip_edge_processing:
+                self.update_preview()
             
             # Fit images to view after loading
             QTimer.singleShot(50, self.fit_images_to_view)
@@ -146,14 +148,15 @@ class GUIMethods:
         self.simplify_label.setText(f"{self.params['simplify_pct']:.1f}")
         self.scale_label.setText(f"{self.params['mm_per_px']:.3f}")
         
-        # Process image
-        self.current_mask = find_edges_and_contours(self.original_image, self.params)
-        self.current_contours = contours_from_mask(
-            self.current_mask, 
-            self.params["largest_n"], 
-            self.params["simplify_pct"],
-            self.params["gap_threshold"]
-        )
+        # Process image (skip if loading project to preserve saved contours)
+        if not hasattr(self, 'loading_project') or not self.loading_project:
+            self.current_mask = find_edges_and_contours(self.original_image, self.params)
+            self.current_contours = contours_from_mask(
+                self.current_mask, 
+                self.params["largest_n"], 
+                self.params["simplify_pct"],
+                self.params["gap_threshold"]
+            )
         
         # Display DXF preview
         self.display_dxf_preview()
@@ -1271,13 +1274,12 @@ class GUIMethods:
         
         if file_path:
             try:
-                # Process contours for export
-                export_contours = contours_from_mask(
-                    self.current_mask, 
-                    self.params["largest_n"], 
-                    self.params["simplify_pct"],
-                    self.params["gap_threshold"]
-                )
+                # Use current_contours as the primary source (includes all edge detection work)
+                if hasattr(self, 'current_contours') and self.current_contours:
+                    import copy
+                    export_contours = copy.deepcopy(self.current_contours)
+                else:
+                    export_contours = []
                 
                 # Filter out erased contours and add edited contours
                 filtered_contours = []
@@ -1293,6 +1295,8 @@ class GUIMethods:
                 
                 # Add manually edited contours
                 filtered_contours.extend(self.edited_contours)
+                
+                print(f"DEBUG: DXF Export - Using {len(export_contours)} current contours + {len(self.edited_contours)} edited contours = {len(filtered_contours)} total")
                 
                 # Convert drawing items to contours
                 drawing_contours = self.convert_drawing_items_to_contours()

@@ -1034,12 +1034,18 @@ class ImageEmbossGUI(QMainWindow, GUIMethods):
                 'settings_locked': self.settings_locked,
                 'background_transparency': self.background_transparency,
                 'current_contours': self.current_contours,
-                'current_mask': self.current_mask
+                'current_mask': self.current_mask,
+                'edited_contours': self.edited_contours,
+                'erased_contours': self.erased_contours,
+                'erased_points': self.erased_points
             }
             
             # Save to file
             with open(file_path, 'wb') as f:
                 pickle.dump(project_data, f)
+            
+            # Debug output
+            print(f"DEBUG: Project saved with {len(self.current_contours)} current contours, {len(self.edited_contours)} edited contours, {len(self.erased_contours)} erased contours, {len(self.erased_points)} erased points")
             
             self.status_bar.showMessage(f"Project saved to {file_path}")
             
@@ -1063,6 +1069,9 @@ class ImageEmbossGUI(QMainWindow, GUIMethods):
             return
         
         try:
+            # Set flag to prevent preview updates during loading
+            self.loading_project = True
+            
             # Load project data
             with open(file_path, 'rb') as f:
                 project_data = pickle.load(f)
@@ -1073,22 +1082,33 @@ class ImageEmbossGUI(QMainWindow, GUIMethods):
             self.settings_locked = project_data.get('settings_locked', False)
             self.background_transparency = project_data.get('background_transparency', 0)
             
-            # Restore output data
-            self.current_contours = project_data.get('current_contours', [])
-            self.current_mask = project_data.get('current_mask', None)
-            
-            # Load the original image if path is available
+            # Load the original image if path is available (but don't process edges yet)
             image_path = project_data.get('image_path')
             if image_path and os.path.exists(image_path):
-                self.load_image_from_path(image_path)
+                # Load image without processing edges
+                self.load_image_from_path(image_path, skip_edge_processing=True)
             elif self.original_image is not None:
-                # If image is already loaded, just refresh the preview
-                self.display_dxf_preview()
+                # Image already loaded, just continue
+                pass
             
-            # Update UI elements
+            # Restore output data AFTER loading image
+            self.current_contours = project_data.get('current_contours', [])
+            self.current_mask = project_data.get('current_mask', None)
+            self.edited_contours = project_data.get('edited_contours', [])
+            self.erased_contours = project_data.get('erased_contours', set())
+            self.erased_points = project_data.get('erased_points', set())
+            
+            # Update UI elements (this will update sliders but won't trigger preview due to loading flag)
             self.update_all_sliders()
             self.transparency_slider.setValue(self.background_transparency)
             self.update_lock_button_state()
+            
+            # Clear loading flag and refresh preview with saved data
+            self.loading_project = False
+            self.display_dxf_preview()
+            
+            # Debug output
+            print(f"DEBUG: Project loaded with {len(self.current_contours)} current contours, {len(self.edited_contours)} edited contours, {len(self.erased_contours)} erased contours, {len(self.erased_points)} erased points")
             
             self.status_bar.showMessage(f"Project loaded from {file_path}")
             

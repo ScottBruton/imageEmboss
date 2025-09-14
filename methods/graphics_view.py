@@ -419,16 +419,25 @@ class ImageGraphicsView(QGraphicsView):
         
         # Update the circle visualization if it's currently visible
         if self.area_process_circle and self.edit_mode in ["area_process", "merge_edges"]:
-            # Get the current center point of the circle
-            rect = self.area_process_circle.rect()
-            current_center = QPointF(rect.center().x(), rect.center().y())
-            # Update the circle with new radius
-            self.show_area_process_circle(current_center)
+            try:
+                # Get the current center point of the circle
+                rect = self.area_process_circle.rect()
+                current_center = QPointF(rect.center().x(), rect.center().y())
+                # Update the circle with new radius
+                self.show_area_process_circle(current_center)
+            except RuntimeError:
+                # Circle was deleted, clear the reference
+                self.area_process_circle = None
     
     def show_area_process_circle(self, center_point):
         """Show a circle indicating the area processing radius"""
         if self.area_process_circle:
-            self.scene.removeItem(self.area_process_circle)
+            try:
+                self.scene.removeItem(self.area_process_circle)
+            except RuntimeError:
+                # Item was already deleted, just clear the reference
+                pass
+            self.area_process_circle = None  # Clear the reference after removal
         
         # Create a circle to show the processing area
         circle = QGraphicsEllipseItem(
@@ -449,7 +458,11 @@ class ImageGraphicsView(QGraphicsView):
     def hide_area_process_circle(self):
         """Hide the area processing circle"""
         if self.area_process_circle:
-            self.scene.removeItem(self.area_process_circle)
+            try:
+                self.scene.removeItem(self.area_process_circle)
+            except RuntimeError:
+                # Item was already deleted, just clear the reference
+                pass
             self.area_process_circle = None
     
     def start_drawing(self, point):

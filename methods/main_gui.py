@@ -79,13 +79,134 @@ class ImageEmbossGUI(QMainWindow, GUIMethods):
                 "gaussian_kernel_size": 5,
                 "canny_lower_threshold": 30,
                 "canny_upper_threshold": 100,
-                "edge_thickness": 3.0,  # Updated to 3.0
-                "gap_threshold": 0.0,  # Updated to 0.0
+                "edge_thickness": 3.0,
+                "gap_threshold": 0.0,
                 "largest_n": 10,
-                "simplify_pct": 0.0,  # Updated to 0.0
+                "simplify_pct": 0.0,
                 "mm_per_px": 0.25,
                 "invert": True
             },
+            # Facial Features
+            "Jaw Line": {
+                "bilateral_diameter": 7,
+                "bilateral_sigma_color": 60,
+                "gaussian_kernel_size": 3,
+                "canny_lower_threshold": 30,
+                "canny_upper_threshold": 90,
+                "edge_thickness": 3,
+                "gap_threshold": 2,
+                "largest_n": 10,
+                "simplify_pct": 1.0,
+                "mm_per_px": 0.25,
+                "invert": True
+            },
+            "Eyes": {
+                "bilateral_diameter": 5,
+                "bilateral_sigma_color": 50,
+                "gaussian_kernel_size": 3,
+                "canny_lower_threshold": 25,
+                "canny_upper_threshold": 80,
+                "edge_thickness": 2,
+                "gap_threshold": 1,
+                "largest_n": 15,
+                "simplify_pct": 0.5,
+                "mm_per_px": 0.25,
+                "invert": True
+            },
+            "Lips": {
+                "bilateral_diameter": 6,
+                "bilateral_sigma_color": 55,
+                "gaussian_kernel_size": 3,
+                "canny_lower_threshold": 20,
+                "canny_upper_threshold": 70,
+                "edge_thickness": 2,
+                "gap_threshold": 1,
+                "largest_n": 12,
+                "simplify_pct": 0.3,
+                "mm_per_px": 0.25,
+                "invert": True
+            },
+            "Nose": {
+                "bilateral_diameter": 6,
+                "bilateral_sigma_color": 60,
+                "gaussian_kernel_size": 3,
+                "canny_lower_threshold": 25,
+                "canny_upper_threshold": 85,
+                "edge_thickness": 2,
+                "gap_threshold": 2,
+                "largest_n": 10,
+                "simplify_pct": 0.8,
+                "mm_per_px": 0.25,
+                "invert": True
+            },
+            "Ears": {
+                "bilateral_diameter": 5,
+                "bilateral_sigma_color": 45,
+                "gaussian_kernel_size": 3,
+                "canny_lower_threshold": 20,
+                "canny_upper_threshold": 75,
+                "edge_thickness": 2,
+                "gap_threshold": 1,
+                "largest_n": 20,
+                "simplify_pct": 0.2,
+                "mm_per_px": 0.25,
+                "invert": True
+            },
+            # Hair
+            "Hair - Fine": {
+                "bilateral_diameter": 4,
+                "bilateral_sigma_color": 40,
+                "gaussian_kernel_size": 3,
+                "canny_lower_threshold": 15,
+                "canny_upper_threshold": 60,
+                "edge_thickness": 1,
+                "gap_threshold": 0.5,
+                "largest_n": 25,
+                "simplify_pct": 0.1,
+                "mm_per_px": 0.25,
+                "invert": True
+            },
+            "Hair - Thick": {
+                "bilateral_diameter": 8,
+                "bilateral_sigma_color": 80,
+                "gaussian_kernel_size": 5,
+                "canny_lower_threshold": 35,
+                "canny_upper_threshold": 120,
+                "edge_thickness": 4,
+                "gap_threshold": 3,
+                "largest_n": 8,
+                "simplify_pct": 1.5,
+                "mm_per_px": 0.25,
+                "invert": True
+            },
+            # Clothing
+            "Clothing - Smooth": {
+                "bilateral_diameter": 10,
+                "bilateral_sigma_color": 100,
+                "gaussian_kernel_size": 5,
+                "canny_lower_threshold": 40,
+                "canny_upper_threshold": 130,
+                "edge_thickness": 4,
+                "gap_threshold": 4,
+                "largest_n": 8,
+                "simplify_pct": 2.0,
+                "mm_per_px": 0.25,
+                "invert": True
+            },
+            "Clothing - Textured": {
+                "bilateral_diameter": 6,
+                "bilateral_sigma_color": 60,
+                "gaussian_kernel_size": 3,
+                "canny_lower_threshold": 25,
+                "canny_upper_threshold": 90,
+                "edge_thickness": 2,
+                "gap_threshold": 2,
+                "largest_n": 15,
+                "simplify_pct": 0.5,
+                "mm_per_px": 0.25,
+                "invert": True
+            },
+            # General Purpose
             "High Detail": {
                 "bilateral_diameter": 6,
                 "bilateral_sigma_color": 60,
@@ -109,6 +230,32 @@ class ImageEmbossGUI(QMainWindow, GUIMethods):
                 "gap_threshold": 6.0,
                 "largest_n": 10,
                 "simplify_pct": 0.6,
+                "mm_per_px": 0.25,
+                "invert": True
+            },
+            "Architecture": {
+                "bilateral_diameter": 8,
+                "bilateral_sigma_color": 80,
+                "gaussian_kernel_size": 3,
+                "canny_lower_threshold": 40,
+                "canny_upper_threshold": 120,
+                "edge_thickness": 3,
+                "gap_threshold": 5,
+                "largest_n": 12,
+                "simplify_pct": 1.0,
+                "mm_per_px": 0.25,
+                "invert": True
+            },
+            "Nature": {
+                "bilateral_diameter": 7,
+                "bilateral_sigma_color": 70,
+                "gaussian_kernel_size": 4,
+                "canny_lower_threshold": 30,
+                "canny_upper_threshold": 100,
+                "edge_thickness": 2,
+                "gap_threshold": 3,
+                "largest_n": 18,
+                "simplify_pct": 0.8,
                 "mm_per_px": 0.25,
                 "invert": True
             }
@@ -805,6 +952,19 @@ class ImageEmbossGUI(QMainWindow, GUIMethods):
         self.lock_settings_btn.clicked.connect(self.toggle_settings_lock)
         layout.addWidget(self.lock_settings_btn)
         
+        # Save/Load project buttons
+        self.save_project_btn = QPushButton("💾")
+        self.save_project_btn.setMaximumSize(25, 25)
+        self.save_project_btn.setToolTip("Save project (settings + output)")
+        self.save_project_btn.clicked.connect(self.save_project)
+        layout.addWidget(self.save_project_btn)
+        
+        self.load_project_btn = QPushButton("📁")
+        self.load_project_btn.setMaximumSize(25, 25)
+        self.load_project_btn.setToolTip("Load project (settings + output)")
+        self.load_project_btn.clicked.connect(self.load_project)
+        layout.addWidget(self.load_project_btn)
+        
         layout.addSpacing(10)
         
         # Edge drawing button
@@ -827,23 +987,164 @@ class ImageEmbossGUI(QMainWindow, GUIMethods):
     
     def on_area_process_requested(self, scene_point, radius):
         """Handle area processing request with appropriate parameters"""
-        # Use locked parameters if available, otherwise use current parameters
-        params_to_use = self.locked_params if self.settings_locked and self.locked_params else None
-        self.process_area_for_edges(scene_point, radius, params_to_use)
+        # When settings are locked, use current parameters (updated from sliders)
+        # When unlocked, use current parameters (updated from sliders)
+        # Always pass None to let process_area_for_edges use self.params
+        self.process_area_for_edges(scene_point, radius, None)
     
     def toggle_settings_lock(self):
         """Toggle the lock on current edge detection settings"""
         if self.settings_locked:
             # Unlock settings
             self.settings_locked = False
-            self.locked_params = None
             self.lock_settings_btn.setText("🔒")
             self.lock_settings_btn.setToolTip("Lock current edge detection settings for area processing")
-            self.status_bar.showMessage("Settings unlocked - area processing will use current parameters")
+            self.status_bar.showMessage("Settings unlocked - sliders will update full preview")
         else:
             # Lock current settings
             self.settings_locked = True
-            self.locked_params = self.params.copy()  # Make a copy of current parameters
+            self.lock_settings_btn.setText("🔓")
+            self.lock_settings_btn.setToolTip("Unlock settings - sliders will update full preview")
+            self.status_bar.showMessage("Settings locked - sliders only affect area processing tool")
+    
+    def save_project(self):
+        """Save current project (settings + output) to a file"""
+        from PySide6.QtWidgets import QFileDialog
+        import json
+        import pickle
+        
+        # Get save file path
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, 
+            "Save Project", 
+            "", 
+            "ImageEmboss Project (*.iep)"
+        )
+        
+        if not file_path:
+            return
+        
+        try:
+            # Prepare project data
+            project_data = {
+                'version': '1.0',
+                'image_path': self.image_path,
+                'params': self.params,
+                'locked_params': self.locked_params,
+                'settings_locked': self.settings_locked,
+                'background_transparency': self.background_transparency,
+                'current_contours': self.current_contours,
+                'current_mask': self.current_mask
+            }
+            
+            # Save to file
+            with open(file_path, 'wb') as f:
+                pickle.dump(project_data, f)
+            
+            self.status_bar.showMessage(f"Project saved to {file_path}")
+            
+        except Exception as e:
+            self.status_bar.showMessage(f"Error saving project: {str(e)}")
+    
+    def load_project(self):
+        """Load project (settings + output) from a file"""
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
+        import pickle
+        
+        # Get load file path
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, 
+            "Load Project", 
+            "", 
+            "ImageEmboss Project (*.iep)"
+        )
+        
+        if not file_path:
+            return
+        
+        try:
+            # Load project data
+            with open(file_path, 'rb') as f:
+                project_data = pickle.load(f)
+            
+            # Restore settings
+            self.params = project_data.get('params', self.params)
+            self.locked_params = project_data.get('locked_params', None)
+            self.settings_locked = project_data.get('settings_locked', False)
+            self.background_transparency = project_data.get('background_transparency', 0)
+            
+            # Restore output data
+            self.current_contours = project_data.get('current_contours', [])
+            self.current_mask = project_data.get('current_mask', None)
+            
+            # Load the original image if path is available
+            image_path = project_data.get('image_path')
+            if image_path and os.path.exists(image_path):
+                self.load_image_from_path(image_path)
+            elif self.original_image is not None:
+                # If image is already loaded, just refresh the preview
+                self.display_dxf_preview()
+            
+            # Update UI elements
+            self.update_all_sliders()
+            self.transparency_slider.setValue(self.background_transparency)
+            self.update_lock_button_state()
+            
+            self.status_bar.showMessage(f"Project loaded from {file_path}")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error loading project: {str(e)}")
+            self.status_bar.showMessage(f"Error loading project: {str(e)}")
+    
+    def update_all_sliders(self):
+        """Update all UI sliders to match current parameters"""
+        # Update bilateral sliders
+        self.bilateral_d_slider.setValue(self.params['bilateral_diameter'])
+        self.bilateral_c_slider.setValue(self.params['bilateral_sigma_color'])
+        # Note: bilateral_sigma_space is not controlled by a slider
+        
+        # Update Gaussian slider
+        self.gaussian_slider.setValue(self.params['gaussian_kernel_size'])
+        
+        # Update Canny sliders
+        self.canny_l_slider.setValue(self.params['canny_lower_threshold'])
+        self.canny_u_slider.setValue(self.params['canny_upper_threshold'])
+        
+        # Update other sliders
+        self.thickness_slider.setValue(self.params['edge_thickness'])
+        self.gap_slider.setValue(self.params['gap_threshold'])
+        self.simplify_slider.setValue(self.params['simplify_pct'])
+        self.scale_slider.setValue(int(self.params['mm_per_px'] * 1000))
+        
+        # Update labels
+        self.bilateral_d_label.setText(str(self.params['bilateral_diameter']))
+        self.bilateral_c_label.setText(str(self.params['bilateral_sigma_color']))
+        self.gaussian_label.setText(str(self.params['gaussian_kernel_size']))
+        self.canny_l_label.setText(str(self.params['canny_lower_threshold']))
+        self.canny_u_label.setText(str(self.params['canny_upper_threshold']))
+        self.thickness_label.setText(str(self.params['edge_thickness']))
+        self.gap_label.setText(str(self.params['gap_threshold']))
+        self.simplify_label.setText(str(self.params['simplify_pct']))
+        self.scale_label.setText(str(self.params['mm_per_px']))
+    
+    def update_lock_button_state(self):
+        """Update the lock button state based on current settings"""
+        if self.settings_locked:
             self.lock_settings_btn.setText("🔓")
             self.lock_settings_btn.setToolTip("Unlock settings - area processing will use current parameters")
-            self.status_bar.showMessage("Settings locked - area processing will use locked parameters")
+        else:
+            self.lock_settings_btn.setText("🔒")
+            self.lock_settings_btn.setToolTip("Lock current edge detection settings for area processing")
+    
+    def on_transparency_change(self):
+        """Handle background transparency changes"""
+        # Update the transparency value
+        self.background_transparency = self.transparency_slider.value()
+        
+        print(f"DEBUG: Transparency changed to {self.background_transparency}%")
+        
+        # Update the label
+        self.transparency_label.setText(f"{self.background_transparency}%")
+        
+        # Refresh the preview to apply new transparency
+        self.display_dxf_preview()

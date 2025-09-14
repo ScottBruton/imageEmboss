@@ -164,14 +164,8 @@ class GUIMethods:
             self.dxf_view.scene.clear()
             return
         
-        # Clear the scene but keep the image
-        items_to_remove = []
-        for item in self.dxf_view.scene.items():
-            if not isinstance(item, type(self.dxf_view.image_item)):
-                items_to_remove.append(item)
-        
-        for item in items_to_remove:
-            self.dxf_view.scene.removeItem(item)
+        # Clear the scene completely to avoid duplicate background items
+        self.dxf_view.scene.clear()
         
         # Add original image as background FIRST
         if hasattr(self, 'original_pixmap') and self.original_pixmap:
@@ -182,13 +176,18 @@ class GUIMethods:
             
             # Set transparency based on slider value
             transparency = getattr(self, 'background_transparency', 0) / 100.0
-            print(f"DEBUG: Setting background opacity to {1.0 - transparency} (transparency: {transparency})")
-            background_item.setOpacity(1.0 - transparency)  # 0% slider = opaque, 100% slider = transparent
+            opacity = 1.0 - transparency
+            print(f"DEBUG: Setting background opacity to {opacity} (transparency: {transparency})")
+            background_item.setOpacity(opacity)  # 0% slider = opaque, 100% slider = transparent
             
             self.dxf_view.scene.addItem(background_item)
             
             # Set this as the image_item for coordinate transformation
             self.dxf_view.image_item = background_item
+            
+            print(f"DEBUG: Background item added with opacity {opacity}")
+        else:
+            print("DEBUG: No original_pixmap found")
         
         # No need for white background - we want the original image to show through
         
@@ -281,12 +280,56 @@ class GUIMethods:
         if self.preset_combo.currentText() != "Custom":
             self.preset_combo.setCurrentText("Custom")
         
-        self.update_preview()
+        # Always update the parameters (needed for area processing tool)
+        self.update_parameters_from_sliders()
+        
+        # Only update preview if settings are not locked
+        # Check if we're in the main GUI class and if settings are locked
+        if hasattr(self, 'settings_locked') and self.settings_locked:
+            print("DEBUG: Settings locked - slider changes will only affect area processing tool")
+        else:
+            self.update_preview()
+    
+    def update_parameters_from_sliders(self):
+        """Update parameters from slider values without triggering preview"""
+        # Update bilateral parameters
+        self.params['bilateral_diameter'] = self.bilateral_d_slider.value()
+        self.params['bilateral_sigma_color'] = self.bilateral_c_slider.value()
+        # Note: bilateral_sigma_space is not controlled by a slider, it uses the same value as sigma_color
+        
+        # Update Gaussian parameter
+        self.params['gaussian_kernel_size'] = self.gaussian_slider.value()
+        
+        # Update Canny parameters
+        self.params['canny_lower_threshold'] = self.canny_l_slider.value()
+        self.params['canny_upper_threshold'] = self.canny_u_slider.value()
+        
+        # Update other parameters
+        self.params['edge_thickness'] = self.thickness_slider.value()
+        self.params['gap_threshold'] = self.gap_slider.value()
+        self.params['simplify_pct'] = self.simplify_slider.value()
+        self.params['mm_per_px'] = self.scale_slider.value() / 1000.0
+        
+        # Always update labels to reflect current slider values
+        self.bilateral_d_label.setText(str(self.params['bilateral_diameter']))
+        self.bilateral_c_label.setText(str(self.params['bilateral_sigma_color']))
+        self.gaussian_label.setText(str(self.params['gaussian_kernel_size']))
+        self.canny_l_label.setText(str(self.params['canny_lower_threshold']))
+        self.canny_u_label.setText(str(self.params['canny_upper_threshold']))
+        self.thickness_label.setText(str(self.params['edge_thickness']))
+        self.gap_label.setText(str(self.params['gap_threshold']))
+        self.simplify_label.setText(str(self.params['simplify_pct']))
+        self.scale_label.setText(str(self.params['mm_per_px']))
+        
+        # Debug output to confirm parameter updates
+        print(f"DEBUG: Parameters updated - Canny: {self.params['canny_lower_threshold']}-{self.params['canny_upper_threshold']}")
     
     def on_transparency_change(self):
         """Handle background transparency changes"""
         # Update the transparency value
         self.background_transparency = self.transparency_slider.value()
+        
+        print(f"DEBUG: Transparency changed to {self.background_transparency}%")
         
         # Update the label
         self.transparency_label.setText(f"{self.background_transparency}%")
@@ -314,10 +357,20 @@ class GUIMethods:
         self.largest_slider.setValue(config["largest_n"])
         self.simplify_slider.setValue(int(config["simplify_pct"] * 100))
         self.scale_slider.setValue(int(config["mm_per_px"] * 100))
-        self.invert_checkbox.setChecked(config["invert"])
         
-        # Update preview
-        self.update_preview()
+        # Update parameters from sliders (this happens automatically via slider change events)
+        # But we need to handle the locked state properly
+        if hasattr(self, 'settings_locked') and self.settings_locked:
+            print(f"DEBUG: Preset '{preset_name}' applied to edge tool only (settings locked)")
+            self.status_bar.showMessage(f"Preset '{preset_name}' applied to edge tool only (settings locked)")
+            # Don't update preview when locked - only edge tool will use new settings
+        else:
+            print(f"DEBUG: Preset '{preset_name}' applied to full image processing")
+            self.status_bar.showMessage(f"Preset '{preset_name}' applied to full image processing")
+            # Update preview when not locked
+            self.update_preview()
+        
+        self.invert_checkbox.setChecked(config["invert"])
     
     def on_export_scale_change(self):
         """Update output size display when export scale changes"""
@@ -483,8 +536,26 @@ class GUIMethods:
         self.dxf_view.set_edit_mode(shape_type)
         self.edit_mode = shape_type
     
+    def save_undo_state(self):
+        """Save current contour state for undo/redo operations"""
+        if hasattr(self, 'current_contours'):
+            # Create a deep copy of current contours for undo
+            import copy
+            self.undo_contours = copy.deepcopy(self.current_contours)
+            print(f"DEBUG: Saved undo state with {len(self.current_contours)} contours")
+    
     def undo_action(self):
-        """Undo the last drawing action"""
+        """Undo the last action (drawing or edge detection)"""
+        # First try to undo edge detection if we have saved contours
+        if hasattr(self, 'undo_contours') and self.undo_contours is not None:
+            print(f"DEBUG: Undoing edge detection - restoring {len(self.undo_contours)} contours")
+            self.current_contours = self.undo_contours.copy()
+            self.undo_contours = None  # Clear the undo state
+            self.update_preview()  # Refresh the preview
+            self.status_bar.showMessage("Edge detection undone")
+            return
+        
+        # Fall back to drawing undo
         print(f"DEBUG: undo_action called - can_undo: {self.dxf_view.can_undo()}")
         if self.dxf_view.can_undo():
             self.dxf_view.undo_last_action()
@@ -607,16 +678,22 @@ class GUIMethods:
         # Extract the rectangular area from the original image
         roi = self.original_image[y1:y2, x1:x2]
         
-        # Use provided parameters, locked parameters, or current parameters
+        # Use provided parameters or current parameters
+        # When settings are locked, the area processing tool should use current slider values
         if params is not None:
             params_to_use = params
-        elif hasattr(self, 'locked_params') and self.locked_params:
-            params_to_use = self.locked_params
+            print(f"DEBUG: Using provided parameters for area processing")
         else:
+            # Always use current parameters (updated from sliders)
             params_to_use = self.params
+            print(f"DEBUG: Using current parameters for area processing - Canny: {params_to_use['canny_lower_threshold']}-{params_to_use['canny_upper_threshold']}, Settings locked: {getattr(self, 'settings_locked', False)}")
         
         # Process this area for edges using the same parameters
         edges = find_edges_and_contours(roi, params_to_use)
+        
+        # Debug: Check if edges were found
+        edge_pixels = np.sum(edges > 0)
+        print(f"DEBUG: Found {edge_pixels} edge pixels in ROI of size {roi.shape}")
         
         # Find contours in this area
         area_contours = contours_from_mask(
@@ -625,6 +702,8 @@ class GUIMethods:
             params_to_use["simplify_pct"],
             params_to_use["gap_threshold"]
         )
+        
+        print(f"DEBUG: Found {len(area_contours)} raw contours in area")
         
         # Adjust contours back to full image coordinates
         adjusted_contours = []
@@ -637,14 +716,20 @@ class GUIMethods:
         
         # Filter out tiny contours (artifacts)
         filtered_contours = []
-        for contour in adjusted_contours:
+        for i, contour in enumerate(adjusted_contours):
             area = cv2.contourArea(contour)
-            if area > 50:  # Only keep contours with area > 50 pixels
+            if area > 20:  # Only keep contours with area > 20 pixels (reduced for fine details)
                 filtered_contours.append(contour)
+                print(f"DEBUG: Kept contour {i} with area {area:.1f}")
+            else:
+                print(f"DEBUG: Filtered out contour {i} with area {area:.1f} (too small)")
         
         # Add new contours to existing ones with intersection handling
         if filtered_contours:
             print(f"DEBUG: Before intersection handling - existing: {len(self.current_contours)}, new: {len(filtered_contours)}")
+            
+            # Save state for undo before making changes
+            self.save_undo_state()
             
             # Check for intersections and break up existing contours
             self.current_contours = self.handle_contour_intersections(self.current_contours, filtered_contours)
@@ -684,40 +769,195 @@ class GUIMethods:
         for contour in new_contours:
             cv2.fillPoly(new_mask, [contour], 255)
         
-        print(f"DEBUG: Existing mask pixels: {np.sum(existing_mask > 0)}")
-        print(f"DEBUG: New mask pixels: {np.sum(new_mask > 0)}")
         
-        # Check for intersections between new contours and existing contours
-        # This is more robust than just mask subtraction
-        intersecting_existing = set()
-        
-        for i, existing_contour in enumerate(existing_contours):
-            for j, new_contour in enumerate(new_contours):
-                if self.contours_intersect_detailed(existing_contour, new_contour):
-                    intersecting_existing.add(i)
-                    print(f"DEBUG: New contour {j} intersects with existing contour {i}")
-                    break
-        
-        print(f"DEBUG: Found {len(intersecting_existing)} existing contours that intersect with new ones")
-        
-        # Create result list starting with non-intersecting existing contours
-        result_contours = []
-        for i, existing_contour in enumerate(existing_contours):
-            if i not in intersecting_existing:
-                result_contours.append(existing_contour)
-        
-        # For intersecting existing contours, subtract new contours and add remaining pieces
-        for i in intersecting_existing:
-            existing_contour = existing_contours[i]
-            remaining_pieces = self.subtract_new_from_existing(existing_contour, new_contours)
-            result_contours.extend(remaining_pieces)
+        # NEVER remove existing contours when finding new edges - only add new ones
+        # Start with all existing contours
+        result_contours = list(existing_contours)
         
         # Add all new contours
         result_contours.extend(new_contours)
         
+        # Simple merging: combine overlapping contours using union
+        result_contours = self.simple_merge_overlaps(result_contours)
+        print(f"DEBUG: Kept all existing contours and added {len(new_contours)} new contours, then merged overlaps")
+        
         print(f"DEBUG: Final result: {len(result_contours)} total contours")
         
         return result_contours
+
+    def simple_merge_overlaps(self, contours):
+        """Simple merging approach used in professional software - just union overlapping contours"""
+        if len(contours) <= 1:
+            return contours
+        
+        print(f"DEBUG: Simple merging {len(contours)} contours")
+        
+        # Create a single mask from all contours
+        h, w = self.original_image.shape[:2]
+        combined_mask = np.zeros((h, w), dtype=np.uint8)
+        
+        # Fill all contours into the same mask (union operation)
+        for contour in contours:
+            cv2.fillPoly(combined_mask, [contour], 255)
+        
+        # Find all contours in the combined mask
+        merged_contours, _ = cv2.findContours(combined_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        if merged_contours:
+            print(f"DEBUG: Simple merge result: {len(contours)} -> {len(merged_contours)} contours")
+            return merged_contours
+        else:
+            print(f"DEBUG: Simple merge failed, keeping original contours")
+            return contours
+
+    def safe_merge_overlapping_contours(self, contours):
+        """Safe merging that never loses edges - only merges when it's safe to do so"""
+        if len(contours) <= 1:
+            return contours
+        
+        print(f"DEBUG: Safe merging {len(contours)} contours")
+        
+        # Create a list to track which contours have been processed
+        processed_indices = set()
+        result_contours = []
+        
+        for i, contour1 in enumerate(contours):
+            if i in processed_indices:
+                continue
+                
+            # Find all contours that overlap with this one
+            overlapping_contours = [contour1]
+            
+            for j, contour2 in enumerate(contours[i+1:], i+1):
+                if j in processed_indices:
+                    continue
+                    
+                if self.contours_overlap(contour1, contour2):
+                    overlapping_contours.append(contour2)
+                    processed_indices.add(j)
+                    print(f"DEBUG: Found overlap between contours {i} and {j}")
+            
+            # Try to merge overlapping contours
+            if len(overlapping_contours) > 1:
+                merged_contour = self.merge_contours(overlapping_contours)
+                if merged_contour is not None:
+                    result_contours.append(merged_contour)
+                    print(f"DEBUG: Successfully merged {len(overlapping_contours)} overlapping contours")
+                else:
+                    # If merge failed, keep ALL overlapping contours (never lose edges)
+                    result_contours.extend(overlapping_contours)
+                    print(f"DEBUG: Merge failed, kept all {len(overlapping_contours)} overlapping contours")
+            else:
+                # No overlaps, add the original contour
+                result_contours.append(contour1)
+        
+        print(f"DEBUG: Safe merge result: {len(contours)} -> {len(result_contours)} contours")
+        return result_contours
+
+    def merge_overlapping_contours(self, contours):
+        """Simple post-processing: merge any overlapping contours"""
+        if len(contours) <= 1:
+            return contours
+        
+        print(f"DEBUG: Checking {len(contours)} contours for overlaps")
+        
+        # Create a list to track which contours have been merged
+        merged_indices = set()
+        result_contours = []
+        
+        for i, contour1 in enumerate(contours):
+            if i in merged_indices:
+                continue
+                
+            # Find all contours that overlap with this one
+            overlapping_contours = [contour1]
+            
+            for j, contour2 in enumerate(contours[i+1:], i+1):
+                if j in merged_indices:
+                    continue
+                    
+                if self.contours_overlap(contour1, contour2):
+                    overlapping_contours.append(contour2)
+                    merged_indices.add(j)
+                    print(f"DEBUG: Found overlap between contours {i} and {j}")
+            
+            # If we found overlapping contours, try to merge them
+            if len(overlapping_contours) > 1:
+                merged_contour = self.merge_contours(overlapping_contours)
+                if merged_contour is not None:
+                    result_contours.append(merged_contour)
+                    print(f"DEBUG: Merged {len(overlapping_contours)} overlapping contours")
+                else:
+                    # If merge failed, add ALL overlapping contours (don't lose any)
+                    result_contours.extend(overlapping_contours)
+                    print(f"DEBUG: Merge failed, kept all {len(overlapping_contours)} overlapping contours")
+            else:
+                # No overlaps, add the original contour
+                result_contours.append(contour1)
+        
+        print(f"DEBUG: Reduced {len(contours)} contours to {len(result_contours)} after merging overlaps")
+        return result_contours
+
+    def contours_overlap(self, contour1, contour2):
+        """Check if two contours overlap by checking if their bounding boxes intersect"""
+        try:
+            # Get bounding rectangles
+            x1, y1, w1, h1 = cv2.boundingRect(contour1)
+            x2, y2, w2, h2 = cv2.boundingRect(contour2)
+            
+            # Check if bounding rectangles intersect
+            return not (x1 + w1 < x2 or x2 + w2 < x1 or y1 + h1 < y2 or y2 + h2 < y1)
+            
+        except Exception as e:
+            print(f"DEBUG: Error in contours_overlap: {e}")
+            return False
+
+
+    def is_filled_area_scenario(self, existing_contour, new_contour):
+        """Determine if this is a filled area scenario (remove parent) vs edge extension scenario (keep both)"""
+        try:
+            # Get bounding boxes
+            x1, y1, w1, h1 = cv2.boundingRect(existing_contour)
+            x2, y2, w2, h2 = cv2.boundingRect(new_contour)
+            
+            # Calculate areas
+            existing_area = cv2.contourArea(existing_contour)
+            new_area = cv2.contourArea(new_contour)
+            
+            # Calculate intersection area
+            intersection_x = max(x1, x2)
+            intersection_y = max(y1, y2)
+            intersection_w = min(x1 + w1, x2 + w2) - intersection_x
+            intersection_h = min(y1 + h1, y2 + h2) - intersection_y
+            
+            if intersection_w <= 0 or intersection_h <= 0:
+                return False
+            
+            intersection_area = intersection_w * intersection_h
+            
+            # Calculate overlap ratios
+            new_overlap_ratio = intersection_area / (w2 * h2) if w2 * h2 > 0 else 0
+            existing_overlap_ratio = intersection_area / (w1 * h1) if w1 * h1 > 0 else 0
+            
+            # If new contour is mostly contained within existing contour's bounding box
+            # and the new contour is significantly smaller, it's likely a filled area scenario
+            if new_overlap_ratio > 0.8 and existing_overlap_ratio < 0.3:
+                print(f"DEBUG: Filled area scenario - new overlap: {new_overlap_ratio:.2f}, existing overlap: {existing_overlap_ratio:.2f}")
+                return True
+            
+            # If new contour is much smaller than existing contour, it's likely a filled area scenario
+            if new_area < existing_area * 0.3:
+                print(f"DEBUG: Filled area scenario - new area: {new_area:.0f}, existing area: {existing_area:.0f}")
+                return True
+            
+            # Otherwise, it's likely an edge extension scenario
+            print(f"DEBUG: Edge extension scenario - new overlap: {new_overlap_ratio:.2f}, existing overlap: {existing_overlap_ratio:.2f}")
+            return False
+            
+        except Exception as e:
+            print(f"DEBUG: Error in is_filled_area_scenario: {e}")
+            # Default to edge extension scenario (safer)
+            return False
 
     def contours_intersect_detailed(self, contour1, contour2):
         """Check if two contours intersect using multiple methods"""
@@ -732,26 +972,22 @@ class GUIMethods:
             if not (x1 < x2 + w2 and x1 + w1 > x2 and y1 < y2 + h2 and y1 + h1 > y2):
                 return False
             
-            # Method 2: Sample points from contour2 and check if inside contour1
-            # Only check every 5th point to avoid too many checks
-            for i in range(0, len(contour2), 5):
-                point = contour2[i]
-                x, y = point[0]
-                # Ensure coordinates are integers and valid
-                x, y = int(float(x)), int(float(y))
-                if cv2.pointPolygonTest(contour1, (x, y), False) >= 0:
-                    return True
+            # Method 2: Check if contours actually share pixels (more conservative)
+            # Create masks for both contours
+            h, w = self.original_image.shape[:2]
+            mask1 = np.zeros((h, w), dtype=np.uint8)
+            mask2 = np.zeros((h, w), dtype=np.uint8)
             
-            # Method 3: Sample points from contour1 and check if inside contour2
-            for i in range(0, len(contour1), 5):
-                point = contour1[i]
-                x, y = point[0]
-                # Ensure coordinates are integers and valid
-                x, y = int(float(x)), int(float(y))
-                if cv2.pointPolygonTest(contour2, (x, y), False) >= 0:
-                    return True
+            cv2.fillPoly(mask1, [contour1], 255)
+            cv2.fillPoly(mask2, [contour2], 255)
             
-            return False
+            # Check if masks actually overlap (share pixels)
+            intersection = cv2.bitwise_and(mask1, mask2)
+            overlap_pixels = np.sum(intersection > 0)
+            
+            # Only consider it an intersection if there's significant pixel overlap
+            # (at least 10 pixels overlap to avoid noise)
+            return overlap_pixels > 10
             
         except Exception as e:
             print(f"DEBUG: Error in contours_intersect_detailed: {e}")
@@ -813,35 +1049,32 @@ class GUIMethods:
         mask = np.zeros((h, w), dtype=np.uint8)
         cv2.circle(mask, (image_x, image_y), radius, 255, -1)
         
+        # Save state for undo before making changes
+        self.save_undo_state()
+        
         # Find contours that intersect with the erase area
         contours_to_remove = []
         remaining_contours = []
         
         for contour in self.current_contours:
-            # Check if contour intersects with erase area
-            contour_mask = np.zeros((h, w), dtype=np.uint8)
-            cv2.fillPoly(contour_mask, [contour], 255)
+            # Fast intersection check using bounding box first
+            x, y, w_contour, h_contour = cv2.boundingRect(contour)
             
-            # Check intersection
-            intersection = cv2.bitwise_and(contour_mask, mask)
-            if np.any(intersection > 0):
-                # Contour intersects with erase area
-                # Subtract the erase area from the contour
-                remaining_mask = cv2.bitwise_and(contour_mask, cv2.bitwise_not(mask))
-                
-                # Find remaining contours
-                remaining_parts, _ = cv2.findContours(remaining_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                
-                # Add significant remaining parts
-                for part in remaining_parts:
-                    area = cv2.contourArea(part)
-                    if area > 50:  # Only keep significant parts
-                        remaining_contours.append(part)
+            # Check if bounding box intersects with erase circle
+            # Calculate distance from circle center to bounding box
+            closest_x = max(x, min(image_x, x + w_contour))
+            closest_y = max(y, min(image_y, y + h_contour))
+            distance = np.sqrt((closest_x - image_x)**2 + (closest_y - image_y)**2)
+            
+            if distance <= radius:
+                # Bounding box intersects with erase circle - remove contour
+                contours_to_remove.append(contour)
+                print(f"DEBUG: Removing contour that intersects with erase area (distance: {distance:.1f})")
             else:
                 # Contour doesn't intersect, keep it
                 remaining_contours.append(contour)
         
-        # Update contours
+        # Update contours - simply remove intersecting ones
         self.current_contours = remaining_contours
         
         # Refresh the preview
@@ -931,13 +1164,19 @@ class GUIMethods:
         for contour in contours:
             cv2.fillPoly(combined_mask, [contour], 255)
         
-        # Find the outer contour of the combined shape
-        merged_contours, _ = cv2.findContours(combined_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        # Find all contours in the combined shape (including separate pieces)
+        merged_contours, _ = cv2.findContours(combined_mask, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
         
         if merged_contours:
-            # Return the largest contour
-            largest_contour = max(merged_contours, key=cv2.contourArea)
-            return largest_contour
+            # If we have multiple separate contours, we need to handle them differently
+            if len(merged_contours) == 1:
+                # Single merged contour - return it
+                return merged_contours[0]
+            else:
+                # Multiple separate contours - this means the merge didn't work as expected
+                # Return None to indicate merge failure (so we keep original contours)
+                print(f"DEBUG: Merge resulted in {len(merged_contours)} separate contours - merge failed")
+                return None
         
         return None
 

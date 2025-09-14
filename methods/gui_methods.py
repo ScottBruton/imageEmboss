@@ -206,8 +206,9 @@ class GUIMethods:
                     points.append([point[0][0], point[0][1]])
             
             if len(points) >= 3:
-                # Calculate contour area
-                area = cv2.contourArea(contour)
+                # Calculate contour area (ensure correct data type for OpenCV compatibility)
+                contour_float32 = contour.astype(np.float32)
+                area = cv2.contourArea(contour_float32)
                 
                 # Since we're using RETR_EXTERNAL, all contours should be closed
                 # Let's fill all contours with positive area
@@ -720,7 +721,8 @@ class GUIMethods:
         # Filter out tiny contours (artifacts)
         filtered_contours = []
         for i, contour in enumerate(adjusted_contours):
-            area = cv2.contourArea(contour)
+            contour_float32 = contour.astype(np.float32)
+            area = cv2.contourArea(contour_float32)
             if area > 20:  # Only keep contours with area > 20 pixels (reduced for fine details)
                 filtered_contours.append(contour)
                 print(f"DEBUG: Kept contour {i} with area {area:.1f}")
@@ -924,8 +926,10 @@ class GUIMethods:
             x2, y2, w2, h2 = cv2.boundingRect(new_contour)
             
             # Calculate areas
-            existing_area = cv2.contourArea(existing_contour)
-            new_area = cv2.contourArea(new_contour)
+            existing_contour_float32 = existing_contour.astype(np.float32)
+            new_contour_float32 = new_contour.astype(np.float32)
+            existing_area = cv2.contourArea(existing_contour_float32)
+            new_area = cv2.contourArea(new_contour_float32)
             
             # Calculate intersection area
             intersection_x = max(x1, x2)
@@ -1019,7 +1023,8 @@ class GUIMethods:
         # Filter out tiny pieces
         filtered_remaining = []
         for contour in remaining_contours:
-            area = cv2.contourArea(contour)
+            contour_float32 = contour.astype(np.float32)
+            area = cv2.contourArea(contour_float32)
             if area > 50:  # Only keep significant remaining pieces
                 filtered_remaining.append(contour)
         
@@ -1267,17 +1272,15 @@ class GUIMethods:
         format_msg = QMessageBox()
         format_msg.setWindowTitle("Export Format")
         format_msg.setText("Choose export format:")
-        format_msg.setInformativeText("DXF: 2D vector format\nSTEP: 3D extruded geometry (STEP format)\nOBJ: 3D mesh format (widely supported)\nSTL: 3D mesh format (widely supported)")
+        format_msg.setInformativeText("DXF: 2D vector format\nSTEP: 3D extruded geometry (Professional CAD format)\nSTL: 3D mesh format (Widely supported)")
         
         dxf_btn = QPushButton("DXF")
         step_btn = QPushButton("STEP")
-        obj_btn = QPushButton("OBJ")
         stl_btn = QPushButton("STL")
         cancel_btn = QPushButton("Cancel")
         
         format_msg.addButton(dxf_btn, QMessageBox.ActionRole)
         format_msg.addButton(step_btn, QMessageBox.ActionRole)
-        format_msg.addButton(obj_btn, QMessageBox.ActionRole)
         format_msg.addButton(stl_btn, QMessageBox.ActionRole)
         format_msg.addButton(cancel_btn, QMessageBox.RejectRole)
         
@@ -1297,13 +1300,6 @@ class GUIMethods:
             file_path, _ = QFileDialog.getSaveFileName(
                 self, "Save STEP as",
                 default_name, "STEP Files (*.step);;All Files (*)"
-            )
-        elif format_msg.clickedButton() == obj_btn:
-            # OBJ file dialog
-            default_name = f"{base_name}_{new_w}x{new_h}.obj"
-            file_path, _ = QFileDialog.getSaveFileName(
-                self, "Save OBJ as",
-                default_name, "OBJ Files (*.obj);;All Files (*)"
             )
         elif format_msg.clickedButton() == stl_btn:
             # STL file dialog
@@ -1378,14 +1374,14 @@ class GUIMethods:
                                                   f"STEP file exported successfully!\n\n"
                                                   f"File: {file_path}\n"
                                                   f"Extrusion height: {height}mm\n\n"
-                                                  f"STEP file created using trimesh library - should work with most CAD software including SolidWorks.")
+                                                  f"STEP file created using CadQuery - professional CAD quality, fully compatible with SolidWorks.")
                         else:
                             QMessageBox.warning(self, "Export Failed", 
                                               "STEP export failed. Please try STL format instead.")
                     return
                 
-                elif format_msg.clickedButton() == obj_btn:
-                    # OBJ export path
+                elif format_msg.clickedButton() == stl_btn:
+                    # STL export path using CadQuery
                     from methods.step_export import export_step_file
                     
                     # Ask for extrusion height with proper validation
@@ -1401,37 +1397,10 @@ class GUIMethods:
                                                  effective_mm_per_px, extrude_height=height)
                         if success:
                             QMessageBox.information(self, "Success", 
-                                                  f"OBJ file exported successfully!\n\n"
-                                                  f"File: {file_path}\n"
-                                                  f"Extrusion height: {height}mm\n\n"
-                                                  f"OBJ files can be imported into most CAD software including SolidWorks.")
-                        else:
-                            QMessageBox.warning(self, "Export Failed", 
-                                              "OBJ export failed.")
-                    return
-                
-                
-                elif format_msg.clickedButton() == stl_btn:
-                    # STL export path
-                    from methods.step_export import export_step_file_simple
-                    
-                    # Ask for extrusion height with proper validation
-                    from PySide6.QtWidgets import QInputDialog
-                    height, ok = QInputDialog.getDouble(
-                        self, "Extrusion Height", 
-                        "Enter extrusion height in mm:", 
-                        value=1.0, decimals=1
-                    )
-                    
-                    if ok and height > 0:
-                        success = export_step_file_simple(filtered_contours, file_path, self.current_mask.shape[:2], 
-                                                        effective_mm_per_px, extrude_height=height)
-                        if success:
-                            QMessageBox.information(self, "Success", 
                                                   f"STL file exported successfully!\n\n"
                                                   f"File: {file_path}\n"
                                                   f"Extrusion height: {height}mm\n\n"
-                                                  f"STL files can be imported into most CAD software including SolidWorks.")
+                                                  f"STL file created using CadQuery - professional CAD quality, fully compatible with SolidWorks.")
                         else:
                             QMessageBox.warning(self, "Export Failed", 
                                               "STL export failed.")

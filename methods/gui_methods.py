@@ -1309,12 +1309,61 @@ class GUIMethods:
                 # Calculate effective mm_per_px
                 effective_mm_per_px = self.params["mm_per_px"] / export_scale
                 
-                # Export DXF
-                export_dxf(filtered_contours, file_path, self.current_mask.shape[:2], 
-                          effective_mm_per_px)
+                # Ask user which version to export
+                from PySide6.QtWidgets import QMessageBox, QPushButton
                 
-                QMessageBox.information(self, "Success", 
-                                      f"DXF saved to:\n{file_path}\nSize: {new_w}×{new_h}px")
+                msg = QMessageBox()
+                msg.setWindowTitle("Export DXF")
+                msg.setText("Choose export version:")
+                msg.setInformativeText("Original: Full detail with all vertices\nLightweight: Simplified with splines (recommended)")
+                
+                original_btn = QPushButton("Original")
+                lightweight_btn = QPushButton("Lightweight")
+                both_btn = QPushButton("Both")
+                cancel_btn = QPushButton("Cancel")
+                
+                msg.addButton(original_btn, QMessageBox.ActionRole)
+                msg.addButton(lightweight_btn, QMessageBox.ActionRole)
+                msg.addButton(both_btn, QMessageBox.ActionRole)
+                msg.addButton(cancel_btn, QMessageBox.RejectRole)
+                
+                result = msg.exec()
+                
+                if result == QMessageBox.RejectRole:  # Cancel
+                    return
+                
+                # Export based on user choice
+                if msg.clickedButton() == original_btn:
+                    # Export original version
+                    export_dxf(filtered_contours, file_path, self.current_mask.shape[:2], 
+                              effective_mm_per_px)
+                    QMessageBox.information(self, "Success", 
+                                          f"Original DXF saved to:\n{file_path}\nSize: {new_w}×{new_h}px")
+                
+                elif msg.clickedButton() == lightweight_btn:
+                    # Export lightweight version
+                    from methods.helpers import export_dxf_lightweight
+                    export_dxf_lightweight(filtered_contours, file_path, self.current_mask.shape[:2], 
+                                         effective_mm_per_px)
+                    QMessageBox.information(self, "Success", 
+                                          f"Lightweight DXF saved to:\n{file_path}\nSize: {new_w}×{new_h}px")
+                
+                elif msg.clickedButton() == both_btn:
+                    # Export both versions
+                    from methods.helpers import export_dxf_lightweight
+                    
+                    # Original version
+                    export_dxf(filtered_contours, file_path, self.current_mask.shape[:2], 
+                              effective_mm_per_px)
+                    
+                    # Lightweight version
+                    base_path = file_path.rsplit('.', 1)[0]
+                    lightweight_path = f"{base_path}_lightweight.dxf"
+                    export_dxf_lightweight(filtered_contours, lightweight_path, self.current_mask.shape[:2], 
+                                         effective_mm_per_px)
+                    
+                    QMessageBox.information(self, "Success", 
+                                          f"Both DXF versions saved:\n{file_path}\n{lightweight_path}\nSize: {new_w}×{new_h}px")
                 
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Export failed: {str(e)}")

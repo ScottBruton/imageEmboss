@@ -140,3 +140,82 @@ def export_dxf(contours, out_path, img_size, mm_per_px=0.25):
             msp.add_lwpolyline(pts, close=True)
 
     doc.saveas(out_path)
+
+
+def export_dxf_lightweight(contours, out_path, img_size, mm_per_px=0.25, 
+                          simplify_factor=0.02, min_distance=0.5):
+    """
+    Export contours to a lightweight DXF file with spline fitting.
+    
+    Args:
+        contours: List of contours to export
+        out_path: Output file path
+        img_size: Image size tuple (height, width)
+        mm_per_px: Scale factor in mm per pixel
+        simplify_factor: Contour simplification factor (0.01-0.1)
+        min_distance: Minimum distance between points in mm
+    """
+    import cv2
+    import numpy as np
+    
+    h, w = img_size
+    doc = ezdxf.new()
+    msp = doc.modelspace()
+    
+    total_vertices_before = 0
+    total_vertices_after = 0
+
+    for cnt in contours:
+        if len(cnt) < 3:
+            continue
+            
+        # Convert to numpy array for processing
+        points = np.array([[float(p[0][0]), float(p[0][1])] for p in cnt], dtype=np.float32)
+        total_vertices_before += len(points)
+        
+        # Simplify contour using Douglas-Peucker algorithm
+        epsilon = simplify_factor * cv2.arcLength(points, True)
+        simplified = cv2.approxPolyDP(points, epsilon, True)
+        
+        # Further reduce points by minimum distance
+        if min_distance > 0:
+            filtered_points = []
+            min_dist_px = min_distance / mm_per_px  # Convert mm to pixels
+            
+            for i, point in enumerate(simplified):
+                if i == 0 or i == len(simplified) - 1:  # Always keep first and last
+                    filtered_points.append(point)
+                else:
+                    # Check distance from last added point
+                    last_point = filtered_points[-1]
+                    dist = np.sqrt((point[0] - last_point[0])**2 + (point[1] - last_point[1])**2)
+                    if dist >= min_dist_px:
+                        filtered_points.append(point)
+            
+            simplified = np.array(filtered_points, dtype=np.float32)
+        
+        # Convert to DXF coordinates
+        pts = []
+        for p in simplified:
+            x_mm = p[0] * mm_per_px
+            y_mm = (h - p[1]) * mm_per_px
+            pts.append((x_mm, y_mm))
+        
+        total_vertices_after += len(pts)
+        
+        # Create spline if we have enough points, otherwise use polyline
+        if len(pts) >= 4:
+            try:
+                # Create a smooth spline
+                msp.add_spline(pts, degree=3, close=True)
+            except:
+                # Fallback to polyline if spline fails
+                msp.add_lwpolyline(pts, close=True)
+        elif len(pts) >= 3:
+            msp.add_lwpolyline(pts, close=True)
+
+    doc.saveas(out_path)
+    
+    # Print statistics
+    reduction = ((total_vertices_before - total_vertices_after) / total_vertices_before * 100) if total_vertices_before > 0 else 0
+    print(f"Lightweight DXF: {total_vertices_before} → {total_vertices_after} vertices ({reduction:.1f}% reduction)")

@@ -786,3 +786,193 @@ class ImageGraphicsView(QGraphicsView):
                     event.acceptProposedAction()
                     return
         event.ignore()
+
+
+class DXFViewer(QGraphicsView):
+    """Custom graphics view for displaying DXF files with black background and white lines"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        
+        # Create scene with black background
+        self.scene = QGraphicsScene()
+        self.scene.setBackgroundBrush(QColor(0, 0, 0))  # Black background
+        self.setScene(self.scene)
+        
+        # Set view properties
+        self.setRenderHint(QPainter.Antialiasing)
+        self.setDragMode(QGraphicsView.RubberBandDrag)
+        self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
+        self.setResizeAnchor(QGraphicsView.AnchorUnderMouse)
+        
+        # Set black background for the view itself
+        self.setStyleSheet("background: black;")
+        
+        # Store DXF data
+        self.dxf_files = []
+        self.current_index = 0
+        
+    def load_dxf_files(self, file_paths):
+        """Load multiple DXF files for viewing"""
+        self.dxf_files = file_paths
+        self.current_index = 0
+        if self.dxf_files:
+            self.load_current_dxf()
+    
+    def load_current_dxf(self):
+        """Load and display the current DXF file"""
+        if not self.dxf_files or self.current_index >= len(self.dxf_files):
+            return
+            
+        file_path = self.dxf_files[self.current_index]
+        
+        # Clear scene
+        self.scene.clear()
+        
+        try:
+            # Read DXF file using ezdxf
+            import ezdxf
+            doc = ezdxf.readfile(file_path)
+            msp = doc.modelspace()
+            
+            # Process all entities
+            for entity in msp:
+                if entity.dxftype() == 'LWPOLYLINE':
+                    self.add_lwpolyline(entity)
+                elif entity.dxftype() == 'SPLINE':
+                    self.add_spline(entity)
+                elif entity.dxftype() == 'LINE':
+                    self.add_line(entity)
+                elif entity.dxftype() == 'ARC':
+                    self.add_arc(entity)
+                elif entity.dxftype() == 'CIRCLE':
+                    self.add_circle(entity)
+            
+            # Fit to view
+            self.fitInView(self.scene.itemsBoundingRect(), Qt.KeepAspectRatio)
+            
+        except Exception as e:
+            print(f"Error loading DXF file {file_path}: {e}")
+    
+    def add_lwpolyline(self, entity):
+        """Add LWPOLYLINE entity to scene"""
+        points = []
+        for point in entity.get_points():
+            points.append(QPointF(point[0], -point[1]))  # Flip Y coordinate
+        
+        if len(points) >= 2:
+            # Create path
+            path = QPainterPath()
+            path.moveTo(points[0])
+            for point in points[1:]:
+                path.lineTo(point)
+            
+            if entity.closed:
+                path.closeSubpath()
+            
+            # Create graphics item with white pen
+            path_item = QGraphicsPathItem(path)
+            pen = QPen(QColor(255, 255, 255), 1)  # White pen
+            path_item.setPen(pen)
+            self.scene.addItem(path_item)
+    
+    def add_spline(self, entity):
+        """Add SPLINE entity to scene"""
+        try:
+            # Get fit points (this is what ezdxf splines actually use)
+            points = []
+            
+            # Use fit_points property (this is what the splines actually have)
+            if hasattr(entity, 'fit_points'):
+                for point in entity.fit_points:
+                    points.append(QPointF(point[0], -point[1]))  # Flip Y coordinate
+            
+            if len(points) >= 2:
+                # Create path
+                path = QPainterPath()
+                path.moveTo(points[0])
+                for point in points[1:]:
+                    path.lineTo(point)
+                
+                # Create graphics item with white pen
+                path_item = QGraphicsPathItem(path)
+                pen = QPen(QColor(255, 255, 255), 1)  # White pen
+                path_item.setPen(pen)
+                self.scene.addItem(path_item)
+            else:
+                print(f"DEBUG: Spline has only {len(points)} points, skipping")
+        except Exception as e:
+            print(f"DEBUG: Error processing spline: {e}")
+            pass  # Skip if spline can't be processed
+    
+    def add_line(self, entity):
+        """Add LINE entity to scene"""
+        start = QPointF(entity.dxf.start[0], -entity.dxf.start[1])  # Flip Y
+        end = QPointF(entity.dxf.end[0], -entity.dxf.end[1])  # Flip Y
+        
+        line_item = QGraphicsLineItem(QLineF(start, end))
+        pen = QPen(QColor(255, 255, 255), 1)  # White pen
+        line_item.setPen(pen)
+        self.scene.addItem(line_item)
+    
+    def add_arc(self, entity):
+        """Add ARC entity to scene"""
+        try:
+            center = QPointF(entity.dxf.center[0], -entity.dxf.center[1])  # Flip Y
+            radius = entity.dxf.radius
+            start_angle = math.radians(entity.dxf.start_angle)
+            end_angle = math.radians(entity.dxf.end_angle)
+            
+            # Create arc path
+            path = QPainterPath()
+            path.arcTo(center.x() - radius, center.y() - radius, 
+                      radius * 2, radius * 2, 
+                      math.degrees(start_angle), 
+                      math.degrees(end_angle - start_angle))
+            
+            arc_item = QGraphicsPathItem(path)
+            pen = QPen(QColor(255, 255, 255), 1)  # White pen
+            arc_item.setPen(pen)
+            self.scene.addItem(arc_item)
+        except:
+            pass  # Skip if arc can't be processed
+    
+    def add_circle(self, entity):
+        """Add CIRCLE entity to scene"""
+        center = QPointF(entity.dxf.center[0], -entity.dxf.center[1])  # Flip Y
+        radius = entity.dxf.radius
+        
+        circle_item = QGraphicsEllipseItem(center.x() - radius, center.y() - radius,
+                                         radius * 2, radius * 2)
+        pen = QPen(QColor(255, 255, 255), 1)  # White pen
+        circle_item.setPen(pen)
+        self.scene.addItem(circle_item)
+    
+    def next_file(self):
+        """Navigate to next DXF file"""
+        if self.dxf_files and self.current_index < len(self.dxf_files) - 1:
+            self.current_index += 1
+            self.load_current_dxf()
+            return True
+        return False
+    
+    def previous_file(self):
+        """Navigate to previous DXF file"""
+        if self.dxf_files and self.current_index > 0:
+            self.current_index -= 1
+            self.load_current_dxf()
+            return True
+        return False
+    
+    def get_current_filename(self):
+        """Get current file name"""
+        if self.dxf_files and self.current_index < len(self.dxf_files):
+            import os
+            return os.path.basename(self.dxf_files[self.current_index])
+        return ""
+    
+    def get_file_info(self):
+        """Get current file info"""
+        if self.dxf_files and self.current_index < len(self.dxf_files):
+            return f"{self.current_index + 1} of {len(self.dxf_files)}"
+        return "0 of 0"

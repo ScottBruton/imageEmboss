@@ -145,11 +145,11 @@ def export_dxf(contours, out_path, img_size, mm_per_px=0.25):
 def export_dxf_lightweight(contours, out_path, img_size, mm_per_px=0.25, 
                           simplify_factor=0.02, min_distance=0.5):
     """
-    Export contours to a lightweight DXF file with spline fitting.
+    Export contours to multiple lightweight DXF files with different simplification levels.
     
     Args:
         contours: List of contours to export
-        out_path: Output file path
+        out_path: Base output file path (will create multiple versions)
         img_size: Image size tuple (height, width)
         mm_per_px: Scale factor in mm per pixel
         simplify_factor: Contour simplification factor (0.01-0.1)
@@ -157,65 +157,121 @@ def export_dxf_lightweight(contours, out_path, img_size, mm_per_px=0.25,
     """
     import cv2
     import numpy as np
+    import os
+    
+    if not contours:
+        print("No contours to export")
+        return []
+    
+    # Define simplification levels (percentage of original points to keep)
+    simplification_levels = [0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1]
+    
+    # Get base filename and extension
+    base_path = os.path.splitext(out_path)[0]
+    extension = os.path.splitext(out_path)[1]
     
     h, w = img_size
-    doc = ezdxf.new()
-    msp = doc.modelspace()
+    created_files = []
     
-    total_vertices_before = 0
-    total_vertices_after = 0
-
-    for cnt in contours:
-        if len(cnt) < 3:
-            continue
+    for level in simplification_levels:
+        # Create filename with percentage
+        percentage = int(level * 100)
+        level_path = f"{base_path}_{percentage}pct{extension}"
+        
+        # Create DXF document
+        doc = ezdxf.new()
+        msp = doc.modelspace()
+        
+        total_vertices_before = 0
+        total_vertices_after = 0
+        successful_contours = 0
+        
+        print(f"DEBUG: Creating {percentage}% version with {len(contours)} contours")
+        
+        for i, cnt in enumerate(contours):
+            if len(cnt) < 3:
+                continue
             
-        # Convert to numpy array for processing
-        points = np.array([[float(p[0][0]), float(p[0][1])] for p in cnt], dtype=np.float32)
-        total_vertices_before += len(points)
-        
-        # Simplify contour using Douglas-Peucker algorithm
-        epsilon = simplify_factor * cv2.arcLength(points, True)
-        simplified = cv2.approxPolyDP(points, epsilon, True)
-        
-        # Further reduce points by minimum distance
-        if min_distance > 0:
-            filtered_points = []
-            min_dist_px = min_distance / mm_per_px  # Convert mm to pixels
+            # Convert contour to points
+            points = []
+            for j, p in enumerate(cnt):
+                try:
+                    # Handle numpy array format: [[x, y]]
+                    if isinstance(p, np.ndarray) and p.shape == (1, 2):
+                        # Format: [[x, y]]
+                        x, y = float(p[0][0]), float(p[0][1])
+                        points.append([x, y])
+                    elif len(p) >= 2:
+                        if isinstance(p[0], (list, tuple, np.ndarray)) and len(p[0]) >= 2:
+                            # Format: [[x, y], ...]
+                            x, y = float(p[0][0]), float(p[0][1])
+                        else:
+                            # Format: [x, y]
+                            x, y = float(p[0]), float(p[1])
+                        points.append([x, y])
+                except (IndexError, TypeError, ValueError) as e:
+                    continue
             
-            for i, point in enumerate(simplified):
-                if i == 0 or i == len(simplified) - 1:  # Always keep first and last
-                    filtered_points.append(point)
-                else:
-                    # Check distance from last added point
-                    last_point = filtered_points[-1]
-                    dist = np.sqrt((point[0] - last_point[0])**2 + (point[1] - last_point[1])**2)
-                    if dist >= min_dist_px:
-                        filtered_points.append(point)
+            if len(points) < 3:
+                continue
             
-            simplified = np.array(filtered_points, dtype=np.float32)
+            # Convert to numpy array
+            points_array = np.array(points, dtype=np.float32)
+            total_vertices_before += len(points_array)
+            
+            # Convert to DXF coordinates
+            dxf_points = []
+            for j, p in enumerate(points):
+                try:
+                    # Handle numpy array format: [[x, y]]
+                    if isinstance(p, np.ndarray) and p.shape == (1, 2):
+                        x, y = float(p[0][0]), float(p[0][1])
+                    else:
+                        x, y = float(p[0]), float(p[1])
+                    
+                    x_mm = x * mm_per_px
+                    y_mm = (h - y) * mm_per_px
+                    dxf_points.append((x_mm, y_mm))
+                except Exception as e:
+                    continue
+            
+            if len(dxf_points) >= 3:
+                try:
+                    # Calculate how many points to keep based on simplification level
+                    target_points = max(3, int(len(dxf_points) * level))
+                    
+                    # Sample points evenly to achieve target count
+                    if len(dxf_points) > target_points:
+                        step = len(dxf_points) / target_points
+                        control_points = []
+                        for k in range(target_points):
+                            idx = int(k * step)
+                            if idx < len(dxf_points):
+                                control_points.append(dxf_points[idx])
+                    else:
+                        control_points = dxf_points
+                    
+                    # Add spline with control points
+                    msp.add_spline(control_points, degree=3)
+                    total_vertices_after += len(control_points)
+                    successful_contours += 1
+                    
+                except Exception as e:
+                    # Fallback to polyline if spline fails
+                    try:
+                        msp.add_lwpolyline(dxf_points, close=True)
+                        total_vertices_after += len(dxf_points)
+                        successful_contours += 1
+                    except Exception as e2:
+                        pass
         
-        # Convert to DXF coordinates
-        pts = []
-        for p in simplified:
-            x_mm = p[0] * mm_per_px
-            y_mm = (h - p[1]) * mm_per_px
-            pts.append((x_mm, y_mm))
+        # Save DXF file
+        doc.saveas(level_path)
+        created_files.append(level_path)
         
-        total_vertices_after += len(pts)
-        
-        # Create spline if we have enough points, otherwise use polyline
-        if len(pts) >= 4:
-            try:
-                # Create a smooth spline
-                msp.add_spline(pts, degree=3, close=True)
-            except:
-                # Fallback to polyline if spline fails
-                msp.add_lwpolyline(pts, close=True)
-        elif len(pts) >= 3:
-            msp.add_lwpolyline(pts, close=True)
-
-    doc.saveas(out_path)
+        # Print statistics
+        reduction = ((total_vertices_before - total_vertices_after) / total_vertices_before * 100) if total_vertices_before > 0 else 0
+        print(f"{percentage}% DXF: {len(contours)} → {successful_contours} contours, {total_vertices_before} → {total_vertices_after} vertices ({reduction:.1f}% reduction)")
     
-    # Print statistics
-    reduction = ((total_vertices_before - total_vertices_after) / total_vertices_before * 100) if total_vertices_before > 0 else 0
-    print(f"Lightweight DXF: {total_vertices_before} → {total_vertices_after} vertices ({reduction:.1f}% reduction)")
+    print(f"Created {len(created_files)} lightweight DXF versions")
+    return created_files

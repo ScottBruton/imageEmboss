@@ -1333,21 +1333,21 @@ class GUIMethods:
                     return
                 
                 # Export based on user choice
+                exported_files = []
+                
                 if msg.clickedButton() == original_btn:
                     # Export original version
                     export_dxf(filtered_contours, file_path, self.current_mask.shape[:2], 
                               effective_mm_per_px)
-                    QMessageBox.information(self, "Success", 
-                                          f"Original DXF saved to:\n{file_path}\nSize: {new_w}×{new_h}px")
-                
+                    exported_files.append(file_path)
+                    
                 elif msg.clickedButton() == lightweight_btn:
-                    # Export lightweight version
+                    # Export lightweight version (creates multiple files)
                     from methods.helpers import export_dxf_lightweight
-                    export_dxf_lightweight(filtered_contours, file_path, self.current_mask.shape[:2], 
-                                         effective_mm_per_px)
-                    QMessageBox.information(self, "Success", 
-                                          f"Lightweight DXF saved to:\n{file_path}\nSize: {new_w}×{new_h}px")
-                
+                    lightweight_files = export_dxf_lightweight(filtered_contours, file_path, self.current_mask.shape[:2], 
+                                         effective_mm_per_px, simplify_factor=0.01, min_distance=0.1)
+                    exported_files.extend(lightweight_files)
+                    
                 elif msg.clickedButton() == both_btn:
                     # Export both versions
                     from methods.helpers import export_dxf_lightweight
@@ -1355,15 +1355,20 @@ class GUIMethods:
                     # Original version
                     export_dxf(filtered_contours, file_path, self.current_mask.shape[:2], 
                               effective_mm_per_px)
+                    exported_files.append(file_path)
                     
-                    # Lightweight version
+                    # Lightweight version (creates multiple files)
                     base_path = file_path.rsplit('.', 1)[0]
                     lightweight_path = f"{base_path}_lightweight.dxf"
-                    export_dxf_lightweight(filtered_contours, lightweight_path, self.current_mask.shape[:2], 
-                                         effective_mm_per_px)
-                    
-                    QMessageBox.information(self, "Success", 
-                                          f"Both DXF versions saved:\n{file_path}\n{lightweight_path}\nSize: {new_w}×{new_h}px")
+                    lightweight_files = export_dxf_lightweight(filtered_contours, lightweight_path, self.current_mask.shape[:2], 
+                                         effective_mm_per_px, simplify_factor=0.01, min_distance=0.1)
+                    exported_files.extend(lightweight_files)
+                
+                # Show DXF viewer dialog
+                if exported_files:
+                    from methods.dxf_viewer_dialog import DXFViewerDialog
+                    viewer_dialog = DXFViewerDialog(exported_files, self)
+                    viewer_dialog.exec()
                 
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Export failed: {str(e)}")

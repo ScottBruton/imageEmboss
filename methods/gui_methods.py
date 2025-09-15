@@ -1357,6 +1357,7 @@ class GUIMethods:
                 if format_msg.clickedButton() == step_btn:
                     # STEP export path
                     from methods.step_export import export_step_file
+                    from methods.progress_dialog import ProgressDialog
                     
                     # Ask for extrusion height with proper validation
                     from PySide6.QtWidgets import QInputDialog
@@ -1367,22 +1368,47 @@ class GUIMethods:
                     )
                     
                     if ok and height > 0:
-                        success = export_step_file(filtered_contours, file_path, self.current_mask.shape[:2], 
-                                                 effective_mm_per_px, extrude_height=height)
-                        if success:
-                            QMessageBox.information(self, "Success", 
-                                                  f"STEP file exported successfully!\n\n"
-                                                  f"File: {file_path}\n"
-                                                  f"Extrusion height: {height}mm\n\n"
-                                                  f"STEP file created using CadQuery - professional CAD quality, fully compatible with SolidWorks.")
-                        else:
-                            QMessageBox.warning(self, "Export Failed", 
-                                              "STEP export failed. Please try STL format instead.")
+                        # Create progress dialog
+                        progress_dialog = ProgressDialog(
+                            self, 
+                            "Exporting STEP File", 
+                            f"Exporting {len(filtered_contours)} contours to STEP format..."
+                        )
+                        
+                        # Define progress callback
+                        def progress_callback(value, message):
+                            progress_dialog.update_progress(value, message)
+                        
+                        # Create worker thread for export
+                        from methods.progress_dialog import ExportWorker
+                        from PySide6.QtCore import QThread
+                        
+                        # Create worker thread
+                        self.export_worker = ExportWorker(
+                            export_step_file,
+                            filtered_contours, file_path, self.current_mask.shape[:2], 
+                            effective_mm_per_px, extrude_height=height
+                        )
+                        
+                        # Store worker reference in progress dialog for cancel functionality
+                        progress_dialog.worker = self.export_worker
+                        
+                        # Connect signals
+                        self.export_worker.progress_updated.connect(progress_callback)
+                        self.export_worker.finished.connect(
+                            lambda success, message: self.on_export_finished(
+                                success, message, file_path, height, "STEP", progress_dialog
+                            )
+                        )
+                        
+                        # Start the worker thread
+                        self.export_worker.start()
                     return
                 
                 elif format_msg.clickedButton() == stl_btn:
                     # STL export path using CadQuery
                     from methods.step_export import export_step_file
+                    from methods.progress_dialog import ProgressDialog
                     
                     # Ask for extrusion height with proper validation
                     from PySide6.QtWidgets import QInputDialog
@@ -1393,17 +1419,41 @@ class GUIMethods:
                     )
                     
                     if ok and height > 0:
-                        success = export_step_file(filtered_contours, file_path, self.current_mask.shape[:2], 
-                                                 effective_mm_per_px, extrude_height=height)
-                        if success:
-                            QMessageBox.information(self, "Success", 
-                                                  f"STL file exported successfully!\n\n"
-                                                  f"File: {file_path}\n"
-                                                  f"Extrusion height: {height}mm\n\n"
-                                                  f"STL file created using CadQuery - professional CAD quality, fully compatible with SolidWorks.")
-                        else:
-                            QMessageBox.warning(self, "Export Failed", 
-                                              "STL export failed.")
+                        # Create progress dialog
+                        progress_dialog = ProgressDialog(
+                            self, 
+                            "Exporting STL File", 
+                            f"Exporting {len(filtered_contours)} contours to STL format..."
+                        )
+                        
+                        # Define progress callback
+                        def progress_callback(value, message):
+                            progress_dialog.update_progress(value, message)
+                        
+                        # Create worker thread for export
+                        from methods.progress_dialog import ExportWorker
+                        from PySide6.QtCore import QThread
+                        
+                        # Create worker thread
+                        self.export_worker = ExportWorker(
+                            export_step_file,
+                            filtered_contours, file_path, self.current_mask.shape[:2], 
+                            effective_mm_per_px, extrude_height=height
+                        )
+                        
+                        # Store worker reference in progress dialog for cancel functionality
+                        progress_dialog.worker = self.export_worker
+                        
+                        # Connect signals
+                        self.export_worker.progress_updated.connect(progress_callback)
+                        self.export_worker.finished.connect(
+                            lambda success, message: self.on_export_finished(
+                                success, message, file_path, height, "STL", progress_dialog
+                            )
+                        )
+                        
+                        # Start the worker thread
+                        self.export_worker.start()
                     return
                 
                 else:  # DXF export path
@@ -1469,3 +1519,41 @@ class GUIMethods:
                 
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Export failed: {str(e)}")
+    
+    def on_export_finished(self, success, message, file_path, height, format_type, progress_dialog):
+        """Handle export completion from worker thread"""
+        if success:
+            progress_dialog.finish_success(f"{format_type} export completed successfully!")
+            
+            # Ask if user wants to preview the file
+            from PySide6.QtWidgets import QMessageBox
+            preview_msg = QMessageBox()
+            preview_msg.setWindowTitle("Export Complete")
+            preview_msg.setText(f"{format_type} file exported successfully!")
+            preview_msg.setInformativeText(f"File: {file_path}\nExtrusion height: {height}mm\n\nWould you like to preview the 3D model?")
+            preview_msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+            preview_msg.setDefaultButton(QMessageBox.Yes)
+            
+            if preview_msg.exec() == QMessageBox.Yes:
+                print(f"DEBUG: User chose to preview file: {file_path}")
+                from methods.step_viewer_dialog import StepViewerDialog
+                print("DEBUG: Creating StepViewerDialog...")
+                preview_dialog = StepViewerDialog(self, file_path)
+                print("DEBUG: Executing StepViewerDialog...")
+                preview_dialog.exec()
+                print("DEBUG: StepViewerDialog closed")
+            else:
+                QMessageBox.information(self, "Success", 
+                                      f"{format_type} file exported successfully!\n\n"
+                                      f"File: {file_path}\n"
+                                      f"Extrusion height: {height}mm\n\n"
+                                      f"{format_type} file created using CadQuery - professional CAD quality, fully compatible with SolidWorks.")
+        else:
+            progress_dialog.finish_error(f"{format_type} export failed!")
+            QMessageBox.warning(self, "Export Failed", 
+                              f"{format_type} export failed. Please try a different format.")
+        
+        # Clean up worker thread
+        if hasattr(self, 'export_worker'):
+            self.export_worker.deleteLater()
+            delattr(self, 'export_worker')

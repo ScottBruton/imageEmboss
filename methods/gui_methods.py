@@ -1526,7 +1526,6 @@ class GUIMethods:
             progress_dialog.finish_success(f"{format_type} export completed successfully!")
             
             # Ask if user wants to preview the file
-            from PySide6.QtWidgets import QMessageBox
             preview_msg = QMessageBox()
             preview_msg.setWindowTitle("Export Complete")
             preview_msg.setText(f"{format_type} file exported successfully!")

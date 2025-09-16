@@ -71,7 +71,7 @@ class EnhancedStepExporter:
                 print(f"🔧 ENHANCED EXPORT: Progress callback called with 5%")  # Immediate debug output
             
             workplane = self.cadquery_processor.create_3d_model_parallel(
-                contours, img_size, mm_per_px, extrude_height, progress_callback
+                contours, img_size, mm_per_px, extrude_height, progress_callback, out_path
             )
             
             if workplane is None:
@@ -143,7 +143,7 @@ class EnhancedStepExporter:
                 progress_callback(10, "Creating 3D model with enhanced processing...")
             
             workplane = self.cadquery_processor.create_3d_model_parallel(
-                contours, img_size, mm_per_px, extrude_height, progress_callback
+                contours, img_size, mm_per_px, extrude_height, progress_callback, out_path
             )
             
             if workplane is None:

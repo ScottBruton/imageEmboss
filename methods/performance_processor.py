@@ -305,7 +305,7 @@ class EnhancedCADQueryProcessor:
     
     def create_3d_model_parallel(self, contours: List, img_size: Tuple[int, int], 
                                mm_per_px: float, extrude_height: float,
-                               progress_callback: Callable = None) -> Optional[cq.Workplane]:
+                               progress_callback: Callable = None, output_path: str = None) -> Optional[cq.Workplane]:
         """
         Create 3D model using CADQuery with parallel processing
         
@@ -434,59 +434,26 @@ class EnhancedCADQueryProcessor:
                 self.logger.error("No wire batches could be extruded successfully")
                 return None
             
-            # Combine all extruded solids, saving problematic ones separately
+            # Skip union operation - return all batches as separate bodies
+            # This avoids the "Null TopoDS_Shape" errors that were causing most batches to fail
             if progress_callback:
-                progress_callback(85, f"Combining {len(extruded_solids)} extruded batches...")
+                progress_callback(85, f"Preparing {len(extruded_solids)} extruded batches as separate bodies...")
             
             try:
-                if len(extruded_solids) == 1:
-                    final_solid = extruded_solids[0]
-                    problematic_batches = []
-                else:
-                    # Union all solids with validation, saving problematic ones separately
-                    final_solid = extruded_solids[0]
-                    problematic_batches = []
-                    
-                    # Validate the first solid
-                    if final_solid is None or len(final_solid.objects) == 0:
-                        self.logger.error("First solid is null or empty, cannot proceed with union")
-                        return None
-                    
-                    for i, solid in enumerate(extruded_solids[1:], 1):
-                        try:
-                            if progress_callback:
-                                progress = 85 + int((i / len(extruded_solids)) * 10)  # 85-95%
-                                progress_callback(progress, f"Combining batch {i + 1}/{len(extruded_solids)}...")
-                            
-                            # Validate the solid before union
-                            if solid is None or len(solid.objects) == 0:
-                                self.logger.warning(f"Batch {i + 1} solid is null or empty, saving as separate body")
-                                problematic_batches.append((i + 1, solid))
-                                continue
-                            
-                            # Perform the union
-                            union_result = final_solid.union(solid)
-                            
-                            # Validate the union result
-                            if union_result is None or len(union_result.objects) == 0:
-                                self.logger.warning(f"Union of batch {i + 1} produced null or empty result, saving as separate body")
-                                problematic_batches.append((i + 1, solid))
-                                continue
-                            
-                            final_solid = union_result
-                            
-                        except Exception as e:
-                            self.logger.warning(f"Failed to union batch {i + 1}: {e}, saving as separate body")
-                            problematic_batches.append((i + 1, solid))
-                            continue
+                # Create a workplane with all extruded solids as separate bodies
+                final_workplane = cq.Workplane()
                 
-                # Save problematic batches as separate files if any exist
-                if problematic_batches:
-                    self.logger.info(f"Found {len(problematic_batches)} problematic batches, saving as separate files")
-                    self._save_problematic_batches(problematic_batches, extrude_height)
+                for i, solid in enumerate(extruded_solids):
+                    if solid is not None and len(solid.objects) > 0:
+                        final_workplane = final_workplane.add(solid)
+                        if progress_callback:
+                            progress = 85 + int((i / len(extruded_solids)) * 10)  # 85-95%
+                            progress_callback(progress, f"Adding batch {i + 1}/{len(extruded_solids)} as separate body...")
+                    else:
+                        self.logger.warning(f"Batch {i + 1} is null or empty, skipping")
                 
-                self.logger.info(f"Successfully combined {len(extruded_solids) - len(problematic_batches)} extruded batches")
-                return final_solid
+                self.logger.info(f"Successfully prepared {len(final_workplane.objects)} separate bodies (no union)")
+                return final_workplane
                 
             except Exception as e:
                 self.logger.error(f"Failed to combine extruded solids: {e}")
@@ -897,15 +864,22 @@ class EnhancedCADQueryProcessor:
         
         return result_contours if result_contours else contours
     
-    def _save_problematic_batches(self, problematic_batches: List, extrude_height: float):
-        """Save problematic batches as separate STEP files"""
+    def _save_problematic_batches(self, problematic_batches: List, extrude_height: float, main_step_path: str = None):
+        """Save problematic batches as separate STEP files in the same folder as the main STEP file"""
         import os
-        import tempfile
         
         try:
-            # Create a temporary directory for problematic batches
-            temp_dir = tempfile.mkdtemp(prefix="problematic_batches_")
-            self.logger.info(f"Saving problematic batches to: {temp_dir}")
+            # Determine the output directory
+            if main_step_path:
+                # Use the same directory as the main STEP file
+                output_dir = os.path.dirname(main_step_path)
+                main_filename = os.path.splitext(os.path.basename(main_step_path))[0]
+            else:
+                # Fallback to current directory
+                output_dir = os.getcwd()
+                main_filename = "export"
+            
+            self.logger.info(f"Saving problematic batches to: {output_dir}")
             
             for batch_num, solid in problematic_batches:
                 try:
@@ -915,8 +889,8 @@ class EnhancedCADQueryProcessor:
                         continue
                     
                     # Create filename for this batch
-                    filename = f"problematic_batch_{batch_num:03d}.step"
-                    filepath = os.path.join(temp_dir, filename)
+                    filename = f"{main_filename}_batch_{batch_num:03d}.step"
+                    filepath = os.path.join(output_dir, filename)
                     
                     # Export the solid
                     solid.export(filepath)
@@ -926,7 +900,7 @@ class EnhancedCADQueryProcessor:
                     self.logger.warning(f"Failed to save problematic batch {batch_num}: {e}")
                     continue
             
-            self.logger.info(f"Problematic batches saved to directory: {temp_dir}")
+            self.logger.info(f"Problematic batches saved to directory: {output_dir}")
             
         except Exception as e:
             self.logger.error(f"Failed to save problematic batches: {e}")

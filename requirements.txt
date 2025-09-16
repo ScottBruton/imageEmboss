@@ -38,3 +38,5 @@ trimesh==4.8.1
 typing_extensions==4.15.0
 typish==1.9.3
 tzdata==2025.2
+numba>=0.60.0
+multiprocessing-logging>=0.3.4

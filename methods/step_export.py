@@ -7,42 +7,6 @@ import numpy as np
 import os
 import math
 import tempfile
-import threading
-import time
-
-
-def safe_extrude_with_timeout(wire, extrude_height, timeout_seconds=30):
-    """
-    Safely extrude a wire with a timeout to prevent hanging.
-    Uses threading for Windows compatibility.
-    """
-    result = [None]
-    exception = [None]
-    
-    def extrude_worker():
-        try:
-            result[0] = wire.toPending().extrude(extrude_height)
-        except Exception as e:
-            exception[0] = e
-    
-    # Start extrusion in a separate thread
-    thread = threading.Thread(target=extrude_worker)
-    thread.daemon = True
-    thread.start()
-    
-    # Wait for completion or timeout
-    thread.join(timeout=timeout_seconds)
-    
-    if thread.is_alive():
-        print(f"WARNING: Contour extrusion timed out after {timeout_seconds} seconds")
-        return None
-    
-    if exception[0]:
-        raise exception[0]
-    
-    return result[0]
-
-
 def export_step_file(contours, out_path, img_size, mm_per_px=0.25, extrude_height=1.0, progress_callback=None):
     """
     Export contours to a 3D file with extruded geometry using CadQuery.
@@ -136,39 +100,13 @@ def export_step_file_cadquery(contours, out_path, img_size, mm_per_px=0.25, extr
         if progress_callback:
             progress_callback(50, "DXF file created, importing with CadQuery...")
         
-        # Use CadQuery to import DXF and extrude - process contours individually to avoid hanging
+        # Use CadQuery to import DXF and extrude
         try:
             if progress_callback:
                 progress_callback(60, "Importing DXF with CadQuery...")
             
-            # Import DXF and get wires with timeout
-            def import_dxf_worker():
-                try:
-                    result[0] = cq.importers.importDXF(temp_dxf_path).wires()
-                except Exception as e:
-                    exception[0] = e
-            
-            result = [None]
-            exception = [None]
-            
-            # Start DXF import in a separate thread with timeout
-            thread = threading.Thread(target=import_dxf_worker)
-            thread.daemon = True
-            thread.start()
-            
-            # Wait for DXF import with timeout
-            thread.join(timeout=60)  # 60 second timeout for DXF import
-            
-            if thread.is_alive():
-                print("ERROR: DXF import timed out after 60 seconds")
-                if progress_callback:
-                    progress_callback(0, "DXF import timed out")
-                return False
-            
-            if exception[0]:
-                raise exception[0]
-            
-            workplane = result[0]
+            # Import DXF and get wires
+            workplane = cq.importers.importDXF(temp_dxf_path).wires()
             print(f"DEBUG: Found wires in DXF, processing individually...")
             
             if progress_callback:
@@ -187,14 +125,10 @@ def export_step_file_cadquery(contours, out_path, img_size, mm_per_px=0.25, extr
                         progress = 65 + (wire_count * 2)  # Simple progress increment
                         progress_callback(min(progress, 80), f"Extruding contour {wire_count}...")
                     
-                    # Try to extrude this individual wire with timeout
-                    extruded = safe_extrude_with_timeout(wire, extrude_height, timeout_seconds=30)
-                    if extruded is not None:
-                        successful_extrusions.append(extruded)
-                        print(f"DEBUG: Successfully extruded contour {wire_count}")
-                    else:
-                        failed_count += 1
-                        print(f"WARNING: Skipped contour {wire_count} (timed out)")
+                    # Try to extrude this individual wire (no timeout)
+                    extruded = wire.toPending().extrude(extrude_height)
+                    successful_extrusions.append(extruded)
+                    print(f"DEBUG: Successfully extruded contour {wire_count}")
                     
                 except Exception as e:
                     failed_count += 1

@@ -1355,9 +1355,11 @@ class GUIMethods:
                 
                 # Handle export based on format choice from earlier
                 if format_msg.clickedButton() == step_btn:
-                    # STEP export path
-                    from methods.step_export import export_step_file
+                    # STEP export path - USE ENHANCED VERSION WITH MULTI-THREADING
+                    from methods.enhanced_step_export import EnhancedStepExporter
+                    from methods.performance_processor import ProcessingConfig
                     from methods.progress_dialog import ProgressDialog
+                    import multiprocessing as mp
                     
                     # Ask for extrusion height with proper validation
                     from PySide6.QtWidgets import QInputDialog
@@ -1372,20 +1374,51 @@ class GUIMethods:
                         progress_dialog = ProgressDialog(
                             self, 
                             "Exporting STEP File", 
-                            f"Exporting {len(filtered_contours)} contours to STEP format..."
+                            f"Exporting {len(filtered_contours)} contours to STEP format with multi-threading..."
                         )
                         
                         # Define progress callback
                         def progress_callback(value, message):
                             progress_dialog.update_progress(value, message)
                         
+                        # Create enhanced STEP exporter with performance optimizations
+                        print(f"🔧 GUI: Creating enhanced STEP exporter...")  # Immediate debug output
+                        performance_config = ProcessingConfig(
+                            max_workers=mp.cpu_count(),
+                            chunk_size=10,
+                            use_numba=True,
+                            use_cadquery=True,
+                            parallel_extrusion=True,
+                            enable_profiling=False,
+                            log_performance=True
+                        )
+                        
+                        enhanced_exporter = EnhancedStepExporter(performance_config)
+                        print(f"🔧 GUI: Enhanced exporter created successfully")  # Immediate debug output
+                        
                         # Create worker thread for export
                         from methods.progress_dialog import ExportWorker
                         from PySide6.QtCore import QThread
                         
-                        # Create worker thread
+                        # Create worker thread with enhanced exporter and fallback
+                        def export_with_fallback(contours, out_path, img_size, mm_per_px, extrude_height, progress_callback=None):
+                            print(f"🔧 FALLBACK FUNCTION: Starting export with {len(contours)} contours")  # Immediate debug output
+                            try:
+                                # Try enhanced export first
+                                print(f"🔧 FALLBACK FUNCTION: Attempting enhanced export...")  # Immediate debug output
+                                return enhanced_exporter.export_step_file_enhanced(
+                                    contours, out_path, img_size, mm_per_px, extrude_height, progress_callback
+                                )
+                            except Exception as e:
+                                print(f"🔧 FALLBACK FUNCTION: Enhanced export failed: {e}, falling back to standard export")  # Immediate debug output
+                                # Fallback to standard export
+                                from methods.step_export import export_step_file
+                                return export_step_file(
+                                    contours, out_path, img_size, mm_per_px, extrude_height, progress_callback
+                                )
+                        
                         self.export_worker = ExportWorker(
-                            export_step_file,
+                            export_with_fallback,
                             filtered_contours, file_path, self.current_mask.shape[:2], 
                             effective_mm_per_px, extrude_height=height
                         )
@@ -1406,9 +1439,11 @@ class GUIMethods:
                     return
                 
                 elif format_msg.clickedButton() == stl_btn:
-                    # STL export path using CadQuery
-                    from methods.step_export import export_step_file
+                    # STL export path using ENHANCED CadQuery with multi-threading
+                    from methods.enhanced_step_export import EnhancedStepExporter
+                    from methods.performance_processor import ProcessingConfig
                     from methods.progress_dialog import ProgressDialog
+                    import multiprocessing as mp
                     
                     # Ask for extrusion height with proper validation
                     from PySide6.QtWidgets import QInputDialog
@@ -1423,20 +1458,49 @@ class GUIMethods:
                         progress_dialog = ProgressDialog(
                             self, 
                             "Exporting STL File", 
-                            f"Exporting {len(filtered_contours)} contours to STL format..."
+                            f"Exporting {len(filtered_contours)} contours to STL format with multi-threading..."
                         )
                         
                         # Define progress callback
                         def progress_callback(value, message):
                             progress_dialog.update_progress(value, message)
                         
+                        # Create enhanced STEP exporter with performance optimizations
+                        print(f"🔧 GUI: Creating enhanced STEP exporter...")  # Immediate debug output
+                        performance_config = ProcessingConfig(
+                            max_workers=mp.cpu_count(),
+                            chunk_size=10,
+                            use_numba=True,
+                            use_cadquery=True,
+                            parallel_extrusion=True,
+                            enable_profiling=False,
+                            log_performance=True
+                        )
+                        
+                        enhanced_exporter = EnhancedStepExporter(performance_config)
+                        print(f"🔧 GUI: Enhanced exporter created successfully")  # Immediate debug output
+                        
                         # Create worker thread for export
                         from methods.progress_dialog import ExportWorker
                         from PySide6.QtCore import QThread
                         
-                        # Create worker thread
+                        # Create worker thread with enhanced exporter and fallback
+                        def export_stl_with_fallback(contours, out_path, img_size, mm_per_px, extrude_height, progress_callback=None):
+                            try:
+                                # Try enhanced export first
+                                return enhanced_exporter.export_stl_file_enhanced(
+                                    contours, out_path, img_size, mm_per_px, extrude_height, progress_callback
+                                )
+                            except Exception as e:
+                                print(f"Enhanced STL export failed: {e}, falling back to standard export")
+                                # Fallback to standard export
+                                from methods.step_export import export_step_file
+                                return export_step_file(
+                                    contours, out_path, img_size, mm_per_px, extrude_height, progress_callback
+                                )
+                        
                         self.export_worker = ExportWorker(
-                            export_step_file,
+                            export_stl_with_fallback,
                             filtered_contours, file_path, self.current_mask.shape[:2], 
                             effective_mm_per_px, extrude_height=height
                         )

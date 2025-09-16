@@ -61,12 +61,14 @@ class EnhancedStepExporter:
             return False
         
         self.logger.info(f"Enhanced STEP export: {len(contours)} contours, {extrude_height}mm height")
+        print(f"🔧 ENHANCED EXPORT: Starting with {len(contours)} contours")  # Immediate debug output
         start_time = time.time()
         
         try:
             # Create 3D model using enhanced CADQuery processor
             if progress_callback:
-                progress_callback(10, "Creating 3D model with enhanced processing...")
+                progress_callback(5, f"Starting enhanced processing of {len(contours)} contours...")
+                print(f"🔧 ENHANCED EXPORT: Progress callback called with 5%")  # Immediate debug output
             
             workplane = self.cadquery_processor.create_3d_model_parallel(
                 contours, img_size, mm_per_px, extrude_height, progress_callback
@@ -76,11 +78,18 @@ class EnhancedStepExporter:
                 self.logger.error("Failed to create 3D model")
                 return False
             
+            # Check if there were any problematic batches
+            if hasattr(self.cadquery_processor, 'problematic_batches_saved'):
+                self.logger.info("Some batches were saved as separate files due to union issues")
+            
             if progress_callback:
-                progress_callback(90, "Exporting STEP file...")
+                progress_callback(85, "3D model created, exporting to STEP file...")
             
             # Export to STEP file
             workplane.export(out_path)
+            
+            if progress_callback:
+                progress_callback(95, "STEP file saved, creating STL preview...")
             
             # Create STL preview file
             stl_path = out_path.replace('.step', '_preview.stl')
@@ -94,7 +103,7 @@ class EnhancedStepExporter:
             self.logger.info(f"Enhanced STEP export completed in {elapsed_time:.2f}s")
             
             if progress_callback:
-                progress_callback(100, "STEP export completed!")
+                progress_callback(100, f"STEP export completed! ({elapsed_time:.1f}s, {len(contours)} contours)")
             
             return True
             

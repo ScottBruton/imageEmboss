@@ -57,7 +57,7 @@ def find_edges_and_contours(img_bgr, params):
 
 def contours_from_mask(mask, largest_n=3, simplify_pct=0.6, gap_threshold=5.0):
     """
-    Extract contours from a binary mask with optional gap closing and simplification.
+    Extract contours from a binary mask with improved closed contour detection.
     
     Args:
         mask: Binary mask image
@@ -68,17 +68,42 @@ def contours_from_mask(mask, largest_n=3, simplify_pct=0.6, gap_threshold=5.0):
     Returns:
         list: List of contours
     """
-    # Find external contours only
-    contours, _ = cv2.findContours(255 - mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)  # invert so dark = fill
+    print(f"🔍 CONTOUR DETECTION: Starting with largest_n={largest_n}, simplify_pct={simplify_pct}, gap_threshold={gap_threshold}")
+    
+    # Use RETR_TREE to get all contours (external and internal) and preserve hierarchy
+    # Use CHAIN_APPROX_NONE to preserve all points for better closure detection
+    contours, hierarchy = cv2.findContours(255 - mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)  # invert so dark = fill
 
     if not contours:
+        print("❌ CONTOUR DETECTION: No contours found")
         return []
 
-    # Keep N largest by area
-    contours = sorted(contours, key=cv2.contourArea, reverse=True)[:max(1, int(largest_n))]
+    print(f"🔍 CONTOUR DETECTION: Found {len(contours)} raw contours")
+    
+    # Filter contours by area and keep more contours for better detail preservation
+    min_area = 50  # Minimum area to avoid tiny artifacts
+    filtered_contours = []
+    
+    for i, contour in enumerate(contours):
+        area = cv2.contourArea(contour)
+        if area >= min_area:
+            filtered_contours.append(contour)
+            if i < 5:  # Log first few for debugging
+                print(f"✅ Contour {i}: area={area:.1f}, points={len(contour)}")
+        else:
+            if i < 5:  # Log first few for debugging
+                print(f"❌ Contour {i}: area={area:.1f} (too small, filtered out)")
+
+    print(f"🔍 CONTOUR DETECTION: {len(filtered_contours)} contours after area filtering")
+
+    # Sort by area and keep more contours for better detail
+    contours = sorted(filtered_contours, key=cv2.contourArea, reverse=True)[:max(1, int(largest_n * 3))]  # Keep 3x more for better detail
+    
+    print(f"🔍 CONTOUR DETECTION: Keeping top {len(contours)} contours by area")
 
     # Apply gap threshold to connect nearby contour segments
     if gap_threshold > 0:
+        print(f"🔍 CONTOUR DETECTION: Applying gap closing with threshold {gap_threshold}")
         # Apply gap closing to the entire mask first
         kernel_size = max(1, int(gap_threshold))
         kernel = np.ones((kernel_size, kernel_size), np.uint8)
@@ -91,12 +116,13 @@ def contours_from_mask(mask, largest_n=3, simplify_pct=0.6, gap_threshold=5.0):
         closed_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_CLOSE, kernel)
         
         # Find new contours from the gap-closed mask
-        new_contours, _ = cv2.findContours(closed_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        new_contours, _ = cv2.findContours(closed_mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
         
         if new_contours:
             # Keep the largest contours
-            new_contours = sorted(new_contours, key=cv2.contourArea, reverse=True)[:max(1, int(largest_n))]
+            new_contours = sorted(new_contours, key=cv2.contourArea, reverse=True)[:max(1, int(largest_n * 3))]
             contours = new_contours
+            print(f"🔍 CONTOUR DETECTION: Gap closing resulted in {len(contours)} contours")
 
     if simplify_pct and simplify_pct > 0:
         h, w = mask.shape[:2]
@@ -107,6 +133,22 @@ def contours_from_mask(mask, largest_n=3, simplify_pct=0.6, gap_threshold=5.0):
             approx = cv2.approxPolyDP(c, eps, True)
             simplified.append(approx if len(approx) >= 3 else c)
         contours = simplified
+
+    # Check closure rate of detected contours
+    closed_count = 0
+    for i, contour in enumerate(contours):
+        if len(contour) >= 3:
+            first_point = contour[0][0]
+            last_point = contour[-1][0]
+            gap = np.sqrt((first_point[0] - last_point[0])**2 + (first_point[1] - last_point[1])**2)
+            if gap < 1.0:  # Within 1 pixel
+                closed_count += 1
+    
+    closure_rate = (closed_count / len(contours) * 100) if contours else 0
+    print(f"📊 CONTOUR DETECTION SUMMARY:")
+    print(f"   Total contours: {len(contours)}")
+    print(f"   Closed contours: {closed_count}")
+    print(f"   Closure rate: {closure_rate:.1f}%")
 
     return contours
 
@@ -125,21 +167,179 @@ def export_dxf(contours, out_path, img_size, mm_per_px=0.25):
     doc = ezdxf.new()
     msp = doc.modelspace()
 
+    # Check contour closure before export
+    closed_count = 0
+    open_count = 0
+    total_contours = len(contours)
+    
+    print(f"🔍 DXF Export: Checking closure of {total_contours} contours...")
+
     # Image coords have origin top-left, y down.
     # DXF uses origin bottom-left, y up.
     # Flip Y and scale to mm.
-    for cnt in contours:
+    for i, cnt in enumerate(contours):
         pts = []
         for p in cnt:
+            # Handle the nested array structure: [[x, y]]
             x = float(p[0][0])
             y = float(p[0][1])
             x_mm = x * mm_per_px
             y_mm = (h - y) * mm_per_px
             pts.append((x_mm, y_mm))
+        
         if len(pts) >= 3:
-            msp.add_lwpolyline(pts, close=True)
+            # Check if contour is closed
+            is_closed = _is_contour_closed(pts)
+            if is_closed:
+                closed_count += 1
+                if i < 5:  # Log first few for debugging
+                    print(f"✅ Contour {i}: CLOSED ({len(pts)} points)")
+            else:
+                open_count += 1
+                if i < 5:  # Log first few for debugging
+                    print(f"❌ Contour {i}: OPEN ({len(pts)} points) - closing with smart interpolation")
+                # Close the contour using smart interpolation
+                pts = _close_contour_smart(pts, max_gap=5.0)  # 5mm max gap
+            
+            # Add as closed polyline
+            polyline = msp.add_lwpolyline(pts, close=True)
+            polyline.closed = True
+
+    # Print summary
+    print(f"📊 DXF Export Summary:")
+    print(f"   Total contours: {total_contours}")
+    print(f"   Closed contours: {closed_count}")
+    print(f"   Open contours: {open_count}")
+    print(f"   Closure rate: {(closed_count/total_contours)*100:.1f}%")
 
     doc.saveas(out_path)
+    print(f"💾 DXF file saved to: {out_path}")
+
+
+def _is_contour_closed(points, tolerance=2.0):
+    """Check if a contour is closed by comparing first and last points"""
+    if len(points) < 3:
+        return False
+    
+    first_point = points[0]
+    last_point = points[-1]
+    
+    # Calculate actual distance between first and last points
+    import math
+    distance = math.sqrt((first_point[0] - last_point[0])**2 + (first_point[1] - last_point[1])**2)
+    
+    return distance < tolerance
+
+
+def _close_contour_smart(points, max_gap=5.0):
+    """
+    Intelligently close a contour by connecting endpoints.
+    
+    Args:
+        points: List of (x, y) points
+        max_gap: Maximum distance to consider for closing (in same units as points)
+    
+    Returns:
+        List of points with the contour properly closed
+    """
+    if len(points) < 3:
+        return points
+    
+    first_point = points[0]
+    last_point = points[-1]
+    
+    # Calculate distance between first and last points
+    import math
+    gap_distance = math.sqrt((first_point[0] - last_point[0])**2 + (first_point[1] - last_point[1])**2)
+    
+    # If already closed (within tolerance), return as-is
+    if gap_distance < 1e-6:
+        return points
+    
+    # If gap is small, just add the first point to close it
+    if gap_distance <= max_gap:
+        return points + [first_point]
+    
+    # For larger gaps, create a smooth connection
+    # Use a simple linear interpolation for now (could be enhanced with splines)
+    num_interpolation_points = max(2, int(gap_distance / max_gap))
+    
+    interpolated_points = []
+    for i in range(1, num_interpolation_points):
+        t = i / num_interpolation_points
+        x = last_point[0] + t * (first_point[0] - last_point[0])
+        y = last_point[1] + t * (first_point[1] - last_point[1])
+        interpolated_points.append((x, y))
+    
+    return points + interpolated_points + [first_point]
+
+
+def _close_contour_spline(points, max_gap=5.0):
+    """
+    Close a contour using spline interpolation for smooth curves.
+    
+    Args:
+        points: List of (x, y) points
+        max_gap: Maximum distance to consider for closing
+    
+    Returns:
+        List of points with the contour properly closed using spline
+    """
+    if len(points) < 3:
+        return points
+    
+    first_point = points[0]
+    last_point = points[-1]
+    
+    # Calculate distance between first and last points
+    import math
+    gap_distance = math.sqrt((first_point[0] - last_point[0])**2 + (first_point[1] - last_point[1])**2)
+    
+    # If already closed, return as-is
+    if gap_distance < 1e-6:
+        return points
+    
+    # If gap is small, just add the first point
+    if gap_distance <= max_gap:
+        return points + [first_point]
+    
+    try:
+        # Use scipy for spline interpolation if available
+        import numpy as np
+        from scipy.interpolate import CubicSpline
+        
+        # Create closed loop by adding first point at the end
+        closed_points = points + [first_point]
+        
+        # Convert to numpy arrays
+        x_coords = np.array([p[0] for p in closed_points])
+        y_coords = np.array([p[1] for p in closed_points])
+        
+        # Create parameter array (cumulative distance along the curve)
+        distances = np.zeros(len(closed_points))
+        for i in range(1, len(closed_points)):
+            distances[i] = distances[i-1] + math.sqrt(
+                (x_coords[i] - x_coords[i-1])**2 + (y_coords[i] - y_coords[i-1])**2
+            )
+        
+        # Create spline interpolations
+        cs_x = CubicSpline(distances, x_coords, bc_type='periodic')
+        cs_y = CubicSpline(distances, y_coords, bc_type='periodic')
+        
+        # Generate smooth points along the entire curve
+        total_distance = distances[-1]
+        num_points = max(len(points), int(total_distance / max_gap))
+        t_new = np.linspace(0, total_distance, num_points)
+        
+        x_new = cs_x(t_new)
+        y_new = cs_y(t_new)
+        
+        # Convert back to list of tuples
+        return [(float(x), float(y)) for x, y in zip(x_new, y_new)]
+        
+    except ImportError:
+        # Fallback to simple linear interpolation if scipy not available
+        return _close_contour_smart(points, max_gap)
 
 
 def export_dxf_lightweight(contours, out_path, img_size, mm_per_px=0.25, 
@@ -187,6 +387,10 @@ def export_dxf_lightweight(contours, out_path, img_size, mm_per_px=0.25,
         successful_contours = 0
         
         print(f"DEBUG: Creating {percentage}% version with {len(contours)} contours")
+        
+        # Check closure for this simplification level
+        closed_count = 0
+        open_count = 0
         
         for i, cnt in enumerate(contours):
             if len(cnt) < 3:
@@ -236,6 +440,15 @@ def export_dxf_lightweight(contours, out_path, img_size, mm_per_px=0.25,
                     continue
             
             if len(dxf_points) >= 3:
+                # Check if contour is closed
+                is_closed = _is_contour_closed(dxf_points)
+                if is_closed:
+                    closed_count += 1
+                else:
+                    open_count += 1
+                    # Close the contour using smart interpolation
+                    dxf_points = _close_contour_smart(dxf_points, max_gap=5.0)
+                
                 try:
                     # Calculate how many points to keep based on simplification level
                     target_points = max(3, int(len(dxf_points) * level))
@@ -259,7 +472,8 @@ def export_dxf_lightweight(contours, out_path, img_size, mm_per_px=0.25,
                 except Exception as e:
                     # Fallback to polyline if spline fails
                     try:
-                        msp.add_lwpolyline(dxf_points, close=True)
+                        polyline = msp.add_lwpolyline(dxf_points, close=True)
+                        polyline.closed = True
                         total_vertices_after += len(dxf_points)
                         successful_contours += 1
                     except Exception as e2:
@@ -269,9 +483,11 @@ def export_dxf_lightweight(contours, out_path, img_size, mm_per_px=0.25,
         doc.saveas(level_path)
         created_files.append(level_path)
         
-        # Print statistics
+        # Print statistics including closure info
         reduction = ((total_vertices_before - total_vertices_after) / total_vertices_before * 100) if total_vertices_before > 0 else 0
+        closure_rate = (closed_count / (closed_count + open_count) * 100) if (closed_count + open_count) > 0 else 0
         print(f"{percentage}% DXF: {len(contours)} → {successful_contours} contours, {total_vertices_before} → {total_vertices_after} vertices ({reduction:.1f}% reduction)")
+        print(f"   Closure: {closed_count} closed, {open_count} open ({closure_rate:.1f}% closed)")
     
     print(f"Created {len(created_files)} lightweight DXF versions")
     return created_files

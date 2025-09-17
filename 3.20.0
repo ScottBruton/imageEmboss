@@ -1,0 +1,6 @@
+Collecting trimesh
+  Using cached trimesh-4.8.1-py3-none-any.whl.metadata (18 kB)
+Requirement already satisfied: numpy>=1.20 in c:\users\bruto\appdata\local\programs\python\python311\lib\site-packages (from trimesh) (2.2.6)
+Using cached trimesh-4.8.1-py3-none-any.whl (728 kB)
+Installing collected packages: trimesh
+Successfully installed trimesh-4.8.1

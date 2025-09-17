@@ -1258,7 +1258,7 @@ class GUIMethods:
         return contours
     
     def export_dxf(self):
-        """Export the DXF or STEP file"""
+        """Export the DXF file and open the enhanced DXF editor"""
         if self.image_path is None:
             QMessageBox.warning(self, "Warning", "No image loaded.")
             return
@@ -1266,22 +1266,18 @@ class GUIMethods:
         # Get export scale
         export_scale = self.export_scale_input.value()
         
-        # First ask user to choose format
+        # Only offer DXF export - CAD exports will be available after DXF creation
         from PySide6.QtWidgets import QMessageBox, QPushButton
         
         format_msg = QMessageBox()
-        format_msg.setWindowTitle("Export Format")
-        format_msg.setText("Choose export format:")
-        format_msg.setInformativeText("DXF: 2D vector format\nSTEP: 3D extruded geometry (Professional CAD format)\nSTL: 3D mesh format (Widely supported)")
+        format_msg.setWindowTitle("Export DXF")
+        format_msg.setText("Export DXF file:")
+        format_msg.setInformativeText("DXF: 2D vector format\n\nAfter DXF export, you can edit and convert to splines,\nthen export to STEP, STL, or OBJ formats.")
         
-        dxf_btn = QPushButton("DXF")
-        step_btn = QPushButton("STEP")
-        stl_btn = QPushButton("STL")
+        dxf_btn = QPushButton("Export DXF")
         cancel_btn = QPushButton("Cancel")
         
         format_msg.addButton(dxf_btn, QMessageBox.ActionRole)
-        format_msg.addButton(step_btn, QMessageBox.ActionRole)
-        format_msg.addButton(stl_btn, QMessageBox.ActionRole)
         format_msg.addButton(cancel_btn, QMessageBox.RejectRole)
         
         format_result = format_msg.exec()
@@ -1289,32 +1285,17 @@ class GUIMethods:
         if format_result == QMessageBox.RejectRole:  # Cancel
             return
         
-        # Get file path based on chosen format
+        # Get DXF file path
         h, w = self.original_image.shape[:2]
         new_h, new_w = int(h * export_scale), int(w * export_scale)
         base_name = os.path.splitext(os.path.basename(self.image_path))[0]
         
-        if format_msg.clickedButton() == step_btn:
-            # STEP file dialog
-            default_name = f"{base_name}_{new_w}x{new_h}.step"
-            file_path, _ = QFileDialog.getSaveFileName(
-                self, "Save STEP as",
-                default_name, "STEP Files (*.step);;All Files (*)"
-            )
-        elif format_msg.clickedButton() == stl_btn:
-            # STL file dialog
-            default_name = f"{base_name}_{new_w}x{new_h}.stl"
-            file_path, _ = QFileDialog.getSaveFileName(
-                self, "Save STL as",
-                default_name, "STL Files (*.stl);;All Files (*)"
-            )
-        else:
-            # DXF file dialog
-            default_name = f"{base_name}_{new_w}x{new_h}.dxf"
-            file_path, _ = QFileDialog.getSaveFileName(
-                self, "Save DXF as",
-                default_name, "AutoCAD DXF (*.dxf)"
-            )
+        # DXF file dialog
+        default_name = f"{base_name}_{new_w}x{new_h}.dxf"
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Save DXF as",
+            default_name, "AutoCAD DXF (*.dxf)"
+        )
         
         if file_path:
             try:
@@ -1353,268 +1334,36 @@ class GUIMethods:
                 # Calculate effective mm_per_px
                 effective_mm_per_px = self.params["mm_per_px"] / export_scale
                 
-                # Handle export based on format choice from earlier
-                if format_msg.clickedButton() == step_btn:
-                    # STEP export path - USE ENHANCED VERSION WITH MULTI-THREADING
-                    from methods.enhanced_step_export import EnhancedStepExporter
-                    from methods.performance_processor import ProcessingConfig
-                    from methods.progress_dialog import ProgressDialog
-                    import multiprocessing as mp
-                    
-                    # Ask for extrusion height with proper validation
-                    from PySide6.QtWidgets import QInputDialog
-                    height, ok = QInputDialog.getDouble(
-                        self, "Extrusion Height", 
-                        "Enter extrusion height in mm:", 
-                        value=1.0, decimals=1
-                    )
-                    
-                    if ok and height > 0:
-                        # Create progress dialog
-                        progress_dialog = ProgressDialog(
-                            self, 
-                            "Exporting STEP File", 
-                            f"Exporting {len(filtered_contours)} contours to STEP format with multi-threading..."
-                        )
-                        
-                        # Define progress callback
-                        def progress_callback(value, message):
-                            progress_dialog.update_progress(value, message)
-                        
-                        # Create enhanced STEP exporter with performance optimizations
-                        print(f"🔧 GUI: Creating enhanced STEP exporter...")  # Immediate debug output
-                        performance_config = ProcessingConfig(
-                            max_workers=mp.cpu_count(),
-                            chunk_size=10,
-                            use_numba=True,
-                            use_cadquery=True,
-                            parallel_extrusion=True,
-                            enable_profiling=False,
-                            log_performance=True
-                        )
-                        
-                        enhanced_exporter = EnhancedStepExporter(performance_config)
-                        print(f"🔧 GUI: Enhanced exporter created successfully")  # Immediate debug output
-                        
-                        # Create worker thread for export
-                        from methods.progress_dialog import ExportWorker
-                        from PySide6.QtCore import QThread
-                        
-                        # Create worker thread with enhanced exporter and fallback
-                        def export_with_fallback(contours, out_path, img_size, mm_per_px, extrude_height, progress_callback=None):
-                            print(f"🔧 FALLBACK FUNCTION: Starting export with {len(contours)} contours")  # Immediate debug output
-                            try:
-                                # Try enhanced export first
-                                print(f"🔧 FALLBACK FUNCTION: Attempting enhanced export...")  # Immediate debug output
-                                return enhanced_exporter.export_step_file_enhanced(
-                                    contours, out_path, img_size, mm_per_px, extrude_height, progress_callback
-                                )
-                            except Exception as e:
-                                print(f"🔧 FALLBACK FUNCTION: Enhanced export failed: {e}, falling back to standard export")  # Immediate debug output
-                                # Fallback to standard export
-                                from methods.step_export import export_step_file
-                                return export_step_file(
-                                    contours, out_path, img_size, mm_per_px, extrude_height, progress_callback
-                                )
-                        
-                        self.export_worker = ExportWorker(
-                            export_with_fallback,
-                            filtered_contours, file_path, self.current_mask.shape[:2], 
-                            effective_mm_per_px, extrude_height=height
-                        )
-                        
-                        # Store worker reference in progress dialog for cancel functionality
-                        progress_dialog.worker = self.export_worker
-                        
-                        # Connect signals
-                        self.export_worker.progress_updated.connect(progress_callback)
-                        self.export_worker.finished.connect(
-                            lambda success, message: self.on_export_finished(
-                                success, message, file_path, height, "STEP", progress_dialog
-                            )
-                        )
-                        
-                        # Start the worker thread
-                        self.export_worker.start()
-                    return
+                # Export DXF using the existing helper function
+                from methods.helpers import export_dxf
+                export_dxf(filtered_contours, file_path, self.current_mask.shape[:2], 
+                          effective_mm_per_px)
                 
-                elif format_msg.clickedButton() == stl_btn:
-                    # STL export path using ENHANCED CadQuery with multi-threading
-                    from methods.enhanced_step_export import EnhancedStepExporter
-                    from methods.performance_processor import ProcessingConfig
-                    from methods.progress_dialog import ProgressDialog
-                    import multiprocessing as mp
-                    
-                    # Ask for extrusion height with proper validation
-                    from PySide6.QtWidgets import QInputDialog
-                    height, ok = QInputDialog.getDouble(
-                        self, "Extrusion Height", 
-                        "Enter extrusion height in mm:", 
-                        value=1.0, decimals=1
-                    )
-                    
-                    if ok and height > 0:
-                        # Create progress dialog
-                        progress_dialog = ProgressDialog(
-                            self, 
-                            "Exporting STL File", 
-                            f"Exporting {len(filtered_contours)} contours to STL format with multi-threading..."
-                        )
-                        
-                        # Define progress callback
-                        def progress_callback(value, message):
-                            progress_dialog.update_progress(value, message)
-                        
-                        # Create enhanced STEP exporter with performance optimizations
-                        print(f"🔧 GUI: Creating enhanced STEP exporter...")  # Immediate debug output
-                        performance_config = ProcessingConfig(
-                            max_workers=mp.cpu_count(),
-                            chunk_size=10,
-                            use_numba=True,
-                            use_cadquery=True,
-                            parallel_extrusion=True,
-                            enable_profiling=False,
-                            log_performance=True
-                        )
-                        
-                        enhanced_exporter = EnhancedStepExporter(performance_config)
-                        print(f"🔧 GUI: Enhanced exporter created successfully")  # Immediate debug output
-                        
-                        # Create worker thread for export
-                        from methods.progress_dialog import ExportWorker
-                        from PySide6.QtCore import QThread
-                        
-                        # Create worker thread with enhanced exporter and fallback
-                        def export_stl_with_fallback(contours, out_path, img_size, mm_per_px, extrude_height, progress_callback=None):
-                            try:
-                                # Try enhanced export first
-                                return enhanced_exporter.export_stl_file_enhanced(
-                                    contours, out_path, img_size, mm_per_px, extrude_height, progress_callback
-                                )
-                            except Exception as e:
-                                print(f"Enhanced STL export failed: {e}, falling back to standard export")
-                                # Fallback to standard export
-                                from methods.step_export import export_step_file
-                                return export_step_file(
-                                    contours, out_path, img_size, mm_per_px, extrude_height, progress_callback
-                                )
-                        
-                        self.export_worker = ExportWorker(
-                            export_stl_with_fallback,
-                            filtered_contours, file_path, self.current_mask.shape[:2], 
-                            effective_mm_per_px, extrude_height=height
-                        )
-                        
-                        # Store worker reference in progress dialog for cancel functionality
-                        progress_dialog.worker = self.export_worker
-                        
-                        # Connect signals
-                        self.export_worker.progress_updated.connect(progress_callback)
-                        self.export_worker.finished.connect(
-                            lambda success, message: self.on_export_finished(
-                                success, message, file_path, height, "STL", progress_dialog
-                            )
-                        )
-                        
-                        # Start the worker thread
-                        self.export_worker.start()
-                    return
-                
-                else:  # DXF export path
-                    # Ask for DXF version
-                    dxf_msg = QMessageBox()
-                    dxf_msg.setWindowTitle("DXF Export Options")
-                    dxf_msg.setText("Choose DXF version:")
-                    dxf_msg.setInformativeText("Original: Full detail with all vertices\nLightweight: Simplified with splines (recommended)")
-                    
-                    original_btn = QPushButton("Original")
-                    lightweight_btn = QPushButton("Lightweight")
-                    both_btn = QPushButton("Both")
-                    cancel_btn = QPushButton("Cancel")
-                    
-                    dxf_msg.addButton(original_btn, QMessageBox.ActionRole)
-                    dxf_msg.addButton(lightweight_btn, QMessageBox.ActionRole)
-                    dxf_msg.addButton(both_btn, QMessageBox.ActionRole)
-                    dxf_msg.addButton(cancel_btn, QMessageBox.RejectRole)
-                    
-                    dxf_result = dxf_msg.exec()
-                    
-                    if dxf_result == QMessageBox.RejectRole:  # Cancel
-                        return
-                    
-                    # Export based on DXF choice
-                    exported_files = []
-                    
-                    if dxf_msg.clickedButton() == original_btn:
-                        # Export original version
-                        from methods.helpers import export_dxf
-                        export_dxf(filtered_contours, file_path, self.current_mask.shape[:2], 
-                                  effective_mm_per_px)
-                        exported_files.append(file_path)
-                        
-                    elif dxf_msg.clickedButton() == lightweight_btn:
-                        # Export lightweight version (creates multiple files)
-                        from methods.helpers import export_dxf_lightweight
-                        lightweight_files = export_dxf_lightweight(filtered_contours, file_path, self.current_mask.shape[:2], 
-                                             effective_mm_per_px, simplify_factor=0.01, min_distance=0.1)
-                        exported_files.extend(lightweight_files)
-                        
-                    elif dxf_msg.clickedButton() == both_btn:
-                        # Export both versions
-                        from methods.helpers import export_dxf, export_dxf_lightweight
-                        
-                        # Original version
-                        export_dxf(filtered_contours, file_path, self.current_mask.shape[:2], 
-                                  effective_mm_per_px)
-                        exported_files.append(file_path)
-                        
-                        # Lightweight version (creates multiple files)
-                        base_path = file_path.rsplit('.', 1)[0]
-                        lightweight_path = f"{base_path}_lightweight.dxf"
-                        lightweight_files = export_dxf_lightweight(filtered_contours, lightweight_path, self.current_mask.shape[:2], 
-                                             effective_mm_per_px, simplify_factor=0.01, min_distance=0.1)
-                        exported_files.extend(lightweight_files)
-                    
-                    # Show DXF viewer dialog
-                    if exported_files:
-                        from methods.dxf_viewer_dialog import DXFViewerDialog
-                        viewer_dialog = DXFViewerDialog(exported_files, self)
-                        viewer_dialog.exec()
+                # Open enhanced DXF preview/editor window
+                self.open_dxf_editor(file_path, filtered_contours, effective_mm_per_px)
                 
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"Export failed: {str(e)}")
+                QMessageBox.critical(self, "Export Error", f"Failed to export DXF: {str(e)}")
+                return
+    
+    def open_dxf_editor(self, dxf_path, contours, mm_per_px):
+        """Open the enhanced DXF editor dialog"""
+        try:
+            from methods.dxf_editor_dialog import DXFEditorDialog
+            
+            # Create and show the DXF editor dialog
+            editor_dialog = DXFEditorDialog(dxf_path, contours, mm_per_px, self)
+            editor_dialog.exec()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open DXF editor: {str(e)}")
     
     def on_export_finished(self, success, message, file_path, height, format_type, progress_dialog):
-        """Handle export completion from worker thread"""
+        """Handle export completion from worker thread (legacy method - not used in new workflow)"""
         if success:
             progress_dialog.finish_success(f"{format_type} export completed successfully!")
-            
-            # Ask if user wants to preview the file
-            preview_msg = QMessageBox()
-            preview_msg.setWindowTitle("Export Complete")
-            preview_msg.setText(f"{format_type} file exported successfully!")
-            preview_msg.setInformativeText(f"File: {file_path}\nExtrusion height: {height}mm\n\nWould you like to preview the 3D model?")
-            preview_msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-            preview_msg.setDefaultButton(QMessageBox.Yes)
-            
-            if preview_msg.exec() == QMessageBox.Yes:
-                print(f"DEBUG: User chose to preview file: {file_path}")
-                from methods.step_viewer_dialog import StepViewerDialog
-                print("DEBUG: Creating StepViewerDialog...")
-                preview_dialog = StepViewerDialog(self, file_path)
-                print("DEBUG: Executing StepViewerDialog...")
-                preview_dialog.exec()
-                print("DEBUG: StepViewerDialog closed")
-            else:
-                QMessageBox.information(self, "Success", 
-                                      f"{format_type} file exported successfully!\n\n"
-                                      f"File: {file_path}\n"
-                                      f"Extrusion height: {height}mm\n\n"
-                                      f"{format_type} file created using CadQuery - professional CAD quality, fully compatible with SolidWorks.")
         else:
             progress_dialog.finish_error(f"{format_type} export failed!")
-            QMessageBox.warning(self, "Export Failed", 
-                              f"{format_type} export failed. Please try a different format.")
         
         # Clean up worker thread
         if hasattr(self, 'export_worker'):

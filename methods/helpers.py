@@ -155,13 +155,102 @@ def contours_from_mask(mask, largest_n=3, simplify_pct=0.6, gap_threshold=5.0):
 
 def export_dxf(contours, out_path, img_size, mm_per_px=0.25):
     """
-    Export contours to a DXF file.
+    Export contours to a DXF file using professional optimization.
     
     Args:
         contours: List of contours to export
         out_path: Output file path
         img_size: Image size tuple (height, width)
         mm_per_px: Scale factor in mm per pixel
+    """
+    print(f"🎨 PROFESSIONAL DXF EXPORT: Processing {len(contours)} contours...")
+    
+    try:
+        # Use the professional DXF optimizer
+        from methods.dxf_optimizer import optimize_contours_for_dxf, OptimizerConfig
+        
+        # Create optimizer configuration for high quality
+        config = OptimizerConfig(
+            endpoint_tolerance=0.05,  # 0.05mm tolerance for endpoint snapping
+            max_deviation=0.02,       # 0.02mm max deviation for simplification
+            min_segment_length=0.005, # 0.005mm minimum segment length
+            preserve_curves=True,     # Preserve curves and arcs
+            auto_close_loops=True,    # Automatically close loops
+            remove_duplicates=True,   # Remove duplicate segments
+            max_gap_to_close=0.1      # 0.1mm max gap to close
+        )
+        
+        # Optimize contours using professional algorithms
+        optimized_contours = optimize_contours_for_dxf(contours, img_size, mm_per_px, config)
+        
+        print(f"🔧 OPTIMIZATION: {len(contours)} original → {len(optimized_contours)} optimized contours")
+        
+        # Create DXF document
+        h, w = img_size
+        doc = ezdxf.new()
+        msp = doc.modelspace()
+        
+        successful_contours = 0
+        
+        # Export optimized contours as high-quality splines
+        for i, contour_points in enumerate(optimized_contours):
+            if len(contour_points) >= 3:
+                try:
+                    # Create smooth B-spline for professional quality
+                    if len(contour_points) >= 4:
+                        # Use fewer control points for smoother curves
+                        if len(contour_points) > 20:
+                            # Sample points evenly for large contours
+                            step = len(contour_points) / 20
+                            control_points = []
+                            for j in range(20):
+                                idx = int(j * step)
+                                if idx < len(contour_points):
+                                    control_points.append(contour_points[idx])
+                        else:
+                            control_points = contour_points
+                        
+                        # Create B-spline for smooth curves
+                        spline = msp.add_spline(control_points, degree=3)
+                        spline.closed = True
+                        successful_contours += 1
+                        
+                        if i < 3:  # Log first few for debugging
+                            print(f"✅ Spline {i}: {len(control_points)} control points")
+                    else:
+                        # Fallback to polyline for simple contours
+                        polyline = msp.add_lwpolyline(contour_points, close=True)
+                        polyline.closed = True
+                        successful_contours += 1
+                        
+                except Exception as e:
+                    # Final fallback to basic polyline
+                    try:
+                        polyline = msp.add_lwpolyline(contour_points, close=True)
+                        polyline.closed = True
+                        successful_contours += 1
+                    except Exception as e2:
+                        print(f"⚠️ Failed to export contour {i}: {e2}")
+
+        # Print summary
+        print(f"📊 PROFESSIONAL DXF EXPORT SUMMARY:")
+        print(f"   Original contours: {len(contours)}")
+        print(f"   Optimized contours: {len(optimized_contours)}")
+        print(f"   Successfully exported: {successful_contours}")
+        print(f"   Success rate: {(successful_contours/len(optimized_contours)*100):.1f}%")
+
+        doc.saveas(out_path)
+        print(f"💾 Professional DXF file saved to: {out_path}")
+        
+    except Exception as e:
+        print(f"⚠️ Professional optimization failed: {e}, falling back to simple export")
+        # Fallback to simple export
+        _export_dxf_simple(contours, out_path, img_size, mm_per_px)
+
+
+def _export_dxf_simple(contours, out_path, img_size, mm_per_px=0.25):
+    """
+    Simple DXF export fallback.
     """
     h, w = img_size
     doc = ezdxf.new()
@@ -172,7 +261,7 @@ def export_dxf(contours, out_path, img_size, mm_per_px=0.25):
     open_count = 0
     total_contours = len(contours)
     
-    print(f"🔍 DXF Export: Checking closure of {total_contours} contours...")
+    print(f"🔍 SIMPLE DXF Export: Processing {total_contours} contours...")
 
     # Image coords have origin top-left, y down.
     # DXF uses origin bottom-left, y up.
@@ -206,14 +295,14 @@ def export_dxf(contours, out_path, img_size, mm_per_px=0.25):
             polyline.closed = True
 
     # Print summary
-    print(f"📊 DXF Export Summary:")
+    print(f"📊 SIMPLE DXF Export Summary:")
     print(f"   Total contours: {total_contours}")
     print(f"   Closed contours: {closed_count}")
     print(f"   Open contours: {open_count}")
     print(f"   Closure rate: {(closed_count/total_contours)*100:.1f}%")
 
     doc.saveas(out_path)
-    print(f"💾 DXF file saved to: {out_path}")
+    print(f"💾 Simple DXF file saved to: {out_path}")
 
 
 def _is_contour_closed(points, tolerance=2.0):

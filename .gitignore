@@ -1,3 +1,45 @@
+# 3D Model Files
 *.step
 *.stl
 *.obj
+
+# DXF Files (can be large)
+*.dxf
+
+# FreeCAD Virtual Environment
+venv_freecad/
+venv_freecad_*/
+
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual Environments
+venv/
+env/
+ENV/
+
+# IDE Files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# Log Files
+*.log
+
+# Temporary Files
+*.tmp
+*.temp
+
+# Large Image Files (if needed)
+# *.jpg
+# *.jpeg
+# *.png
+# *.tiff

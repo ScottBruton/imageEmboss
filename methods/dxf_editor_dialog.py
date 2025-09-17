@@ -232,7 +232,7 @@ class FreeCADWorker(QThread):
     progress_updated = Signal(int, str)
     finished = Signal(bool, str)
     
-    def __init__(self, dxf_path, operation, extrude_height=1.0, contours=None, img_size=None, mm_per_px=None):
+    def __init__(self, dxf_path, operation, extrude_height=1.0, contours=None, img_size=None, mm_per_px=None, dialog=None):
         super().__init__()
         self.dxf_path = dxf_path
         self.operation = operation
@@ -240,6 +240,7 @@ class FreeCADWorker(QThread):
         self.contours = contours
         self.img_size = img_size
         self.mm_per_px = mm_per_px
+        self.dialog = dialog  # Reference to the dialog for updating current DXF path
         
     def run(self):
         try:
@@ -255,142 +256,567 @@ class FreeCADWorker(QThread):
             self.finished.emit(False, f"Operation failed: {str(e)}")
     
     def convert_to_splines(self):
-        """Convert DXF entities to closed splines using FreeCAD"""
-        if not FREECAD_AVAILABLE:
-            self.convert_to_splines_fallback()
-            return
+        """Convert DXF entities to closed splines - using efficient direct method"""
+        # Skip FreeCAD for now since it's too slow with large DXF files
+        # Use the reliable fallback method instead
+        self.convert_to_splines_fallback()
+    
+    def convert_to_splines_with_timeout(self):
+        """Convert with timeout protection"""
+        import threading
+        import time
         
-        try:
-            self.progress_updated.emit(10, "Loading DXF into FreeCAD...")
-            
-            # Create new FreeCAD document
-            import FreeCAD
-            doc = FreeCAD.newDocument("DXF_Splines")
-            
-            # Import DXF
-            import Draft
-            Draft.importDXF(self.dxf_path)
-            
-            self.progress_updated.emit(30, "Processing entities...")
-            
-            # Get all objects in the document
-            objects = doc.Objects
-            spline_count = 0
-            
-            for obj in objects:
-                if hasattr(obj, 'Shape'):
-                    # Convert to spline if it's a wire or edge
-                    if obj.Shape.ShapeType == 'Wire':
+        # Set a timeout of 5 minutes
+        timeout_seconds = 300
+        
+        def run_conversion():
+            try:
+                self.convert_to_splines()
+            except Exception as e:
+                self.finished.emit(False, f"Conversion failed: {str(e)}")
+        
+        # Start conversion in a separate thread
+        conversion_thread = threading.Thread(target=run_conversion)
+        conversion_thread.daemon = True
+        conversion_thread.start()
+        
+        # Wait for completion or timeout
+        conversion_thread.join(timeout_seconds)
+        
+        if conversion_thread.is_alive():
+            # Timeout occurred
+            self.finished.emit(False, f"Conversion timed out after {timeout_seconds} seconds. FreeCAD is taking too long to process the DXF entities. Falling back to direct contour method.")
+            # Force fallback
+            self.convert_to_splines_fallback()
+    
+    def _import_dxf_manually(self, doc, dxf_path=None):
+        """Manually import DXF using ezdxf and create FreeCAD objects"""
+        import ezdxf
+        import Part
+        import FreeCAD
+        
+        # Use provided path or default to self.dxf_path
+        if dxf_path is None:
+            dxf_path = self.dxf_path
+        
+        # Read DXF file
+        doc_dxf = ezdxf.readfile(dxf_path)
+        msp = doc_dxf.modelspace()
+        
+        # Process entities
+        for entity in msp:
+            if entity.dxftype() in ['LINE', 'LWPOLYLINE', 'POLYLINE', 'SPLINE']:
+                try:
+                    # Convert entity to FreeCAD shape
+                    if entity.dxftype() == 'LINE':
+                        start = FreeCAD.Vector(entity.dxf.start.x, entity.dxf.start.y, 0)
+                        end = FreeCAD.Vector(entity.dxf.end.x, entity.dxf.end.y, 0)
+                        edge = Part.makeLine(start, end)
+                        Part.show(edge)
+                    elif entity.dxftype() in ['LWPOLYLINE', 'POLYLINE']:
+                        points = []
+                        for point in entity.get_points():
+                            points.append(FreeCAD.Vector(point[0], point[1], 0))
+                        if len(points) > 1:
+                            wire = Part.makePolygon(points)
+                            Part.show(wire)
+                except:
+                    pass
+    
+    def _export_dxf_manually(self, doc, output_path):
+        """Manually export FreeCAD objects to DXF"""
+        import ezdxf
+        import FreeCAD
+        
+        # Create new DXF document
+        doc_dxf = ezdxf.new('R2010')
+        msp = doc_dxf.modelspace()
+        
+        # Export objects
+        for obj in doc.Objects:
+            if hasattr(obj, 'Shape') and obj.Shape:
+                try:
+                    if obj.Shape.ShapeType == 'Edge':
+                        # Export as line
+                        start = obj.Shape.Vertexes[0].Point
+                        end = obj.Shape.Vertexes[1].Point
+                        msp.add_line((start.x, start.y), (end.x, end.y))
+                    elif obj.Shape.ShapeType == 'Wire':
+                        # Export as polyline
+                        points = [(v.Point.x, v.Point.y) for v in obj.Shape.Vertexes]
+                        if len(points) > 1:
+                            msp.add_lwpolyline(points)
+                    elif obj.Shape.ShapeType == 'BSplineCurve':
+                        # Export B-spline curves as splines
                         try:
-                            # Create B-spline from wire
-                            spline = Draft.makeBSpline(obj.Shape.Edges)
-                            spline_count += 1
+                            # Get control points from the B-spline
+                            curve = obj.Shape.Curve
+                            if hasattr(curve, 'getPoles'):
+                                poles = curve.getPoles()
+                                # Convert to DXF spline
+                                control_points = [(p.x, p.y, 0) for p in poles]
+                                if len(control_points) > 2:
+                                    spline = msp.add_spline(control_points)
+                                    spline.dxf.degree = curve.Degree if hasattr(curve, 'Degree') else 3
                         except:
-                            pass
+                            # Fallback: sample points and create polyline
+                            points = []
+                            for i in range(20):  # Sample 20 points
+                                param = i / 19.0
+                                try:
+                                    point = obj.Shape.valueAt(obj.Shape.FirstParameter + param * (obj.Shape.LastParameter - obj.Shape.FirstParameter))
+                                    points.append((point.x, point.y))
+                                except:
+                                    pass
+                            if len(points) > 1:
+                                msp.add_lwpolyline(points)
+                except Exception as e:
+                    # Debug: print error for troubleshooting
+                    print(f"Export error for {obj.Name}: {e}")
+                    pass
+        
+        # Save DXF
+        doc_dxf.saveas(output_path)
+    
+    def _create_spline_dxf_from_contours(self, output_path):
+        """Create a DXF with splines from contours (fallback method) with overlap detection"""
+        import ezdxf
+        import numpy as np
+        
+        # Create new DXF document
+        doc_dxf = ezdxf.new('R2010')
+        msp = doc_dxf.modelspace()
+        
+        spline_count = 0
+        
+        print(f"Processing {len(self.contours)} contours for spline conversion...")
+        
+        for i, contour in enumerate(self.contours):
+            if len(contour) < 3:
+                print(f"Contour {i}: Skipped - too few points ({len(contour)})")
+                continue
+                
+            try:
+                # Extract points from contour
+                points = []
+                for point in contour:
+                    x = float(point[0][0]) * self.mm_per_px
+                    y = float(point[0][1]) * self.mm_per_px
+                    points.append((x, y))
+                
+                if len(points) < 3:
+                    print(f"Contour {i}: Skipped - too few valid points ({len(points)})")
+                    continue
+                
+                print(f"Contour {i}: Processing {len(points)} points")
+                
+                # Check for self-intersections and split if needed
+                # Skip overlap detection for simple contours to avoid over-processing
+                if len(points) > 20:  # Only check complex contours for overlaps
+                    try:
+                        split_contours = self._detect_and_split_overlaps(points, i)
+                        if len(split_contours) > 1:
+                            print(f"   📊 Contour {i}: Split into {len(split_contours)} contours")
+                        else:
+                            print(f"   ✅ Contour {i}: No overlaps detected, using original")
+                    except Exception as split_error:
+                        print(f"   ❌ Contour {i}: Split detection failed ({split_error}), using original")
+                        split_contours = [points]
+                else:
+                    print(f"   ⚡ Contour {i}: Simple contour, skipping overlap detection")
+                    split_contours = [points]
+                
+                # Process each split contour
+                for split_idx, split_points in enumerate(split_contours):
+                    if len(split_points) < 3:
+                        print(f"   ⚠️ Contour {i}-{split_idx}: Skipped - too few points ({len(split_points)})")
+                        continue
+                    
+                    print(f"   🔄 Processing split contour {i}-{split_idx} with {len(split_points)} points")
+                        
+                    try:
+                        # Try scipy spline first
+                        try:
+                            from scipy.interpolate import splprep, splev
+                            
+                            # Convert to numpy array
+                            points_array = np.array(split_points)
+                            
+                            # Create closed spline (like SolidWorks workflow)
+                            # Add the first point at the end to close the curve
+                            if not np.allclose(points_array[0], points_array[-1]):
+                                points_array = np.vstack([points_array, points_array[0]])
+                            
+                            # Create B-spline using scipy with better parameters for smooth curves
+                            # Use adaptive smoothing based on contour complexity
+                            num_points = len(split_points)
+                            
+                            # Adaptive smoothing factor - more smoothing for complex contours
+                            if num_points > 100:
+                                smoothing_factor = num_points * 0.001  # Light smoothing for complex contours
+                            elif num_points > 50:
+                                smoothing_factor = num_points * 0.005  # Medium smoothing
+                            else:
+                                smoothing_factor = num_points * 0.01   # More smoothing for simple contours
+                            
+                            # Fit spline with adaptive smoothing
+                            tck, u = splprep([points_array[:, 0], points_array[:, 1]], 
+                                           s=smoothing_factor,  # Adaptive smoothing
+                                           k=min(3, num_points-1),  # Degree 3, but not more than points-1
+                                           per=True)  # Periodic (closed curve)
+                            
+                            # Generate many more smooth spline points for better curve quality
+                            num_spline_points = max(100, num_points * 4)  # 4x more points for smoothness
+                            u_new = np.linspace(0, 1, num_spline_points)
+                            spline_points = splev(u_new, tck)
+                            
+                            # Convert to DXF spline with proper control points
+                            control_points = [(x, y, 0) for x, y in zip(spline_points[0], spline_points[1])]
+                            
+                            if len(control_points) > 2:
+                                spline = msp.add_spline(control_points)
+                                spline.dxf.degree = 3
+                                spline_count += 1
+                                if len(split_contours) > 1:
+                                    print(f"Contour {i}-{split_idx}: Created spline with {len(control_points)} control points (split from overlapping contour)")
+                                else:
+                                    print(f"Contour {i}: Created spline with {len(control_points)} control points")
+                                    
+                        except ImportError:
+                            print("Scipy not available, using simple polyline")
+                            # Fallback: create polyline if scipy not available
+                            msp.add_lwpolyline(split_points)
+                            spline_count += 1
+                            
+                        except Exception as e:
+                            print(f"Contour {i}-{split_idx}: Scipy spline failed ({e}), using polyline")
+                            # Fallback: create polyline if spline fails
+                            try:
+                                # Try to create a smooth polyline with fewer points
+                                if len(split_points) > 50:
+                                    # Simplify polyline for better performance
+                                    simplified_points = self._simplify_polyline(split_points, tolerance=0.1)
+                                    msp.add_lwpolyline(simplified_points)
+                                else:
+                                    msp.add_lwpolyline(split_points)
+                                spline_count += 1
+                            except Exception as poly_error:
+                                print(f"Contour {i}-{split_idx}: Polyline creation also failed ({poly_error})")
+                                continue
+                            
+                    except Exception as e:
+                        print(f"Contour {i}-{split_idx}: Error processing split ({e})")
+                        continue
+                    
+            except Exception as e:
+                print(f"Contour {i}: Error processing ({e})")
+                continue
+        
+        # Save DXF
+        doc_dxf.saveas(output_path)
+        print(f"Created DXF with {spline_count} splines from {len(self.contours)} contours")
+        return spline_count
+    
+    def _detect_and_split_overlaps(self, points, contour_idx):
+        """Detect self-intersections in a contour and split into separate contours"""
+        import numpy as np
+        
+        if len(points) < 4:
+            return [points]  # Too few points to have overlaps
+        
+        # Convert to numpy array for easier manipulation
+        points_array = np.array(points)
+        
+        # Check for self-intersections using line segment intersection
+        intersections = []
+        
+        # Check each line segment against all others
+        for i in range(len(points_array) - 1):
+            for j in range(i + 2, len(points_array) - 1):  # Skip adjacent segments
+                # Get line segments
+                p1, p2 = points_array[i], points_array[i + 1]
+                p3, p4 = points_array[j], points_array[j + 1]
+                
+                # Check if segments intersect
+                intersection = self._line_segment_intersection(p1, p2, p3, p4)
+                if intersection is not None:
+                    intersections.append((i, j, intersection))
+                    print(f"   🔍 Contour {contour_idx}: Found intersection at segment {i}-{i+1} with {j}-{j+1}")
+        
+        if not intersections:
+            # No intersections found, return original contour
+            return [points]
+        
+        # Split contour at intersection points
+        split_contours = []
+        used_points = set()
+        
+        for start_idx in range(len(points_array)):
+            if start_idx in used_points:
+                continue
+                
+            # Start a new contour from this point
+            current_contour = []
+            current_idx = start_idx
+            
+            while current_idx not in used_points and len(current_contour) < len(points_array):
+                current_contour.append(points_array[current_idx])
+                used_points.add(current_idx)
+                
+                # Check if this point is an intersection point
+                intersection_found = False
+                for int_i, int_j, int_point in intersections:
+                    if current_idx == int_i or current_idx == int_j:
+                        # Add intersection point (ensure it's a list)
+                        if hasattr(int_point, 'tolist'):
+                            current_contour.append(int_point.tolist())
+                        else:
+                            current_contour.append(list(int_point))
+                        intersection_found = True
+                        break
+                
+                if intersection_found:
+                    break
+                    
+                current_idx = (current_idx + 1) % len(points_array)
+            
+            if len(current_contour) >= 3:
+                # Convert numpy arrays to lists if needed
+                contour_list = []
+                for point in current_contour:
+                    if hasattr(point, 'tolist'):
+                        contour_list.append(point.tolist())
+                    else:
+                        contour_list.append(list(point))
+                split_contours.append(contour_list)
+        
+        if split_contours:
+            print(f"   ✂️ Contour {contour_idx}: Split into {len(split_contours)} separate contours")
+            return split_contours
+        else:
+            return [points]
+    
+    def _line_segment_intersection(self, p1, p2, p3, p4):
+        """Find intersection point of two line segments"""
+        import numpy as np
+        
+        # Convert to numpy arrays
+        p1, p2, p3, p4 = np.array(p1), np.array(p2), np.array(p3), np.array(p4)
+        
+        # Calculate direction vectors
+        d1 = p2 - p1
+        d2 = p4 - p3
+        
+        # Calculate denominator
+        denom = d1[0] * d2[1] - d1[1] * d2[0]
+        
+        if abs(denom) < 1e-10:  # Lines are parallel
+            return None
+        
+        # Calculate parameters
+        t1 = ((p3[0] - p1[0]) * d2[1] - (p3[1] - p1[1]) * d2[0]) / denom
+        t2 = ((p3[0] - p1[0]) * d1[1] - (p3[1] - p1[1]) * d1[0]) / denom
+        
+        # Check if intersection is within both line segments
+        if 0 <= t1 <= 1 and 0 <= t2 <= 1:
+            intersection = p1 + t1 * d1
+            return [float(intersection[0]), float(intersection[1])]
+        
+        return None
+    
+    def _simplify_polyline(self, points, tolerance=0.1):
+        """Simplify a polyline using Douglas-Peucker algorithm"""
+        import numpy as np
+        
+        if len(points) <= 2:
+            return points
+        
+        # Convert to numpy array
+        points_array = np.array(points)
+        
+        # Find the point with maximum distance from the line between first and last points
+        if len(points_array) <= 2:
+            return points
+        
+        # Calculate distances from all points to the line between first and last
+        first_point = points_array[0]
+        last_point = points_array[-1]
+        
+        # Vector from first to last point
+        line_vector = last_point - first_point
+        line_length = np.linalg.norm(line_vector)
+        
+        if line_length < 1e-10:  # Degenerate case
+            return [points[0], points[-1]]
+        
+        # Normalize line vector
+        line_unit = line_vector / line_length
+        
+        max_distance = 0
+        max_index = 0
+        
+        for i in range(1, len(points_array) - 1):
+            # Vector from first point to current point
+            point_vector = points_array[i] - first_point
+            
+            # Project point onto line
+            projection_length = np.dot(point_vector, line_unit)
+            projection = first_point + projection_length * line_unit
+            
+            # Distance from point to line
+            distance = np.linalg.norm(points_array[i] - projection)
+            
+            if distance > max_distance:
+                max_distance = distance
+                max_index = i
+        
+        # If max distance is greater than tolerance, recursively simplify
+        if max_distance > tolerance:
+            # Recursively simplify the two segments
+            left_simplified = self._simplify_polyline(points[:max_index + 1], tolerance)
+            right_simplified = self._simplify_polyline(points[max_index:], tolerance)
+            
+            # Combine results (avoid duplicate middle point)
+            return left_simplified[:-1] + right_simplified
+        else:
+            # All points are within tolerance, return just endpoints
+            return [points[0], points[-1]]
+    
+    def convert_to_splines_fallback(self):
+        """Convert contours to splines using direct contour processing"""
+        try:
+            self.progress_updated.emit(10, "Converting contours to splines...")
+            
+            # Create a DXF with splines directly from contours
+            output_path = self.dxf_path.replace('.dxf', '_splines.dxf')
+            spline_count = self._create_spline_dxf_from_contours(output_path)
             
             self.progress_updated.emit(80, f"Created {spline_count} splines...")
             
-            # Save the modified DXF
-            output_path = self.dxf_path.replace('.dxf', '_splines.dxf')
-            Draft.exportDXF(objects, output_path)
+            # Update the dialog's current DXF path
+            if self.dialog:
+                self.dialog.current_dxf_path = output_path
+                # Reload the preview with the new DXF
+                self.dialog.load_dxf_preview()
             
             self.progress_updated.emit(100, "Spline conversion complete!")
-            self.finished.emit(True, f"Successfully converted to splines!\nSaved to: {output_path}")
-            
-        except Exception as e:
-            self.finished.emit(False, f"FreeCAD spline conversion failed: {str(e)}")
-    
-    def convert_to_splines_fallback(self):
-        """Fallback spline conversion using existing system"""
-        try:
-            self.progress_updated.emit(10, "Using fallback spline conversion...")
-            
-            # Use existing enhanced export system
-            from methods.enhanced_step_export import EnhancedStepExporter
-            from methods.performance_processor import ProcessingConfig
-            import multiprocessing as mp
-            
-            self.progress_updated.emit(30, "Creating enhanced exporter...")
-            
-            # Create enhanced exporter
-            performance_config = ProcessingConfig(
-                max_workers=mp.cpu_count(),
-                chunk_size=10,
-                use_numba=True,
-                use_cadquery=True,
-                parallel_extrusion=False,
-                enable_profiling=False,
-                log_performance=True
-            )
-            
-            enhanced_exporter = EnhancedStepExporter(performance_config)
-            
-            self.progress_updated.emit(50, "Processing contours with enhanced system...")
-            
-            # Create a temporary STEP file to demonstrate the conversion
-            base_path = self.dxf_path.rsplit('.', 1)[0]
-            temp_step_path = f"{base_path}_splines.step"
-            
-            # Use the enhanced system to create a 3D model
-            workplane = enhanced_exporter.cadquery_processor.create_3d_model_parallel(
-                self.contours, self.img_size, self.mm_per_px, 1.0, None
-            )
-            
-            if workplane:
-                workplane.export(temp_step_path)
-                self.progress_updated.emit(100, "Fallback conversion complete!")
-                self.finished.emit(True, f"Contours processed using enhanced system.\nTemporary STEP file: {temp_step_path}")
-            else:
-                self.finished.emit(False, "Failed to process contours with enhanced system")
+            self.finished.emit(True, f"Successfully converted {spline_count} contours to splines!\nSaved to: {output_path}\nPreview updated to show spline version.")
                 
         except Exception as e:
-            self.finished.emit(False, f"Fallback conversion failed: {str(e)}")
+            self.finished.emit(False, f"Spline conversion failed: {str(e)}")
     
     def export_step(self):
-        """Export to STEP using FreeCAD"""
+        """Export to STEP using FreeCAD with detailed logging"""
         if not FREECAD_AVAILABLE:
             self.export_step_fallback()
             return
         
         try:
             self.progress_updated.emit(10, "Loading DXF into FreeCAD...")
+            print("🔧 FreeCAD STEP Export: Starting...")
             
             # Create new FreeCAD document
             import FreeCAD
             doc = FreeCAD.newDocument("DXF_Export")
             
-            # Import DXF
-            import Draft
-            Draft.importDXF(self.dxf_path)
+            # Import DXF using manual method (use current DXF path)
+            self._import_dxf_manually(doc, self.dxf_path)
             
-            self.progress_updated.emit(30, "Extruding contours...")
+            # Count total objects first
+            total_objects = len([obj for obj in doc.Objects if hasattr(obj, 'Shape')])
+            print(f"📊 Found {total_objects} objects in DXF")
             
-            # Get all objects and extrude them
+            self.progress_updated.emit(30, f"Extruding {total_objects} contours...")
+            
+            # Get all objects and extrude them with detailed logging
             objects = doc.Objects
             extruded_count = 0
+            failed_count = 0
+            extruded_solids = []
             
-            for obj in objects:
-                if hasattr(obj, 'Shape') and obj.Shape.ShapeType == 'Wire':
+            for i, obj in enumerate(objects):
+                if hasattr(obj, 'Shape'):
                     try:
-                        # Extrude the wire
-                        import Part
-                        face = Part.Face(obj.Shape)
-                        solid = face.extrude(FreeCAD.Vector(0, 0, self.extrude_height))
-                        extruded_count += 1
-                    except:
-                        pass
+                        progress = 30 + int((i / total_objects) * 40)  # 30-70% range
+                        self.progress_updated.emit(progress, f"Extruding contour {i + 1}/{total_objects}...")
+                        
+                        print(f"🔄 Processing object {i + 1}/{total_objects}: {obj.Name}")
+                        print(f"   Shape type: {obj.Shape.ShapeType}")
+                        print(f"   Shape area: {obj.Shape.Area if hasattr(obj.Shape, 'Area') else 'N/A'}")
+                        
+                        if obj.Shape.ShapeType == 'Wire':
+                            # Create face from wire
+                            import Part
+                            try:
+                                face = Part.Face(obj.Shape)
+                                print(f"   ✅ Created face with area: {face.Area}")
+                                
+                                # Extrude the face
+                                solid = face.extrude(FreeCAD.Vector(0, 0, self.extrude_height))
+                                print(f"   ✅ Extruded solid with volume: {solid.Volume}")
+                                
+                                # Add to extruded solids list
+                                extruded_solids.append(solid)
+                                extruded_count += 1
+                                
+                            except Exception as face_error:
+                                print(f"   ❌ Face creation failed: {face_error}")
+                                failed_count += 1
+                                
+                        elif obj.Shape.ShapeType == 'Edge':
+                            # Try to create wire from edge, then face
+                            import Part
+                            try:
+                                wire = Part.Wire(obj.Shape)
+                                face = Part.Face(wire)
+                                solid = face.extrude(FreeCAD.Vector(0, 0, self.extrude_height))
+                                print(f"   ✅ Extruded edge to solid with volume: {solid.Volume}")
+                                extruded_solids.append(solid)
+                                extruded_count += 1
+                                
+                            except Exception as edge_error:
+                                print(f"   ❌ Edge extrusion failed: {edge_error}")
+                                failed_count += 1
+                        else:
+                            print(f"   ⚠️ Skipping {obj.Shape.ShapeType} - not a wire or edge")
+                            failed_count += 1
+                            
+                    except Exception as e:
+                        print(f"   ❌ Object {i + 1} failed: {e}")
+                        failed_count += 1
+                        continue
             
-            self.progress_updated.emit(70, f"Extruded {extruded_count} objects...")
+            print(f"📊 Extrusion Summary:")
+            print(f"   ✅ Successfully extruded: {extruded_count}")
+            print(f"   ❌ Failed: {failed_count}")
+            print(f"   📦 Total solids created: {len(extruded_solids)}")
             
-            # Export to STEP
-            output_path = self.dxf_path.replace('.dxf', f'_extruded_{self.extrude_height}mm.step')
-            import Part
-            Part.export(objects, output_path)
+            self.progress_updated.emit(70, f"Extruded {extruded_count}/{total_objects} objects...")
             
-            self.progress_updated.emit(100, "STEP export complete!")
-            self.finished.emit(True, f"Successfully exported to STEP!\nSaved to: {output_path}")
+            if extruded_solids:
+                # Create a compound of all solids
+                import Part
+                compound = Part.Compound(extruded_solids)
+                print(f"🔗 Created compound with {len(extruded_solids)} solids")
+                
+                # Export to STEP
+                output_path = self.dxf_path.replace('.dxf', f'_extruded_{self.extrude_height}mm.step')
+                compound.exportStl(output_path.replace('.step', '.stl'))  # Test export first
+                compound.exportStep(output_path)
+                
+                # Check file size
+                import os
+                file_size = os.path.getsize(output_path)
+                print(f"💾 STEP file saved: {output_path}")
+                print(f"📏 File size: {file_size:,} bytes ({file_size/1024:.1f} KB)")
+                
+                self.progress_updated.emit(100, "STEP export complete!")
+                self.finished.emit(True, f"Successfully exported {extruded_count} solids to STEP!\nSaved to: {output_path}\nFile size: {file_size:,} bytes")
+            else:
+                self.finished.emit(False, f"No solids were created. All {total_objects} objects failed to extrude.")
             
         except Exception as e:
+            print(f"❌ FreeCAD STEP export failed: {e}")
             self.finished.emit(False, f"FreeCAD STEP export failed: {str(e)}")
     
     def export_step_fallback(self):
@@ -449,9 +875,8 @@ class FreeCADWorker(QThread):
             import FreeCAD
             doc = FreeCAD.newDocument("DXF_Export")
             
-            # Import DXF
-            import Draft
-            Draft.importDXF(self.dxf_path)
+            # Import DXF using manual method (use current DXF path)
+            self._import_dxf_manually(doc, self.dxf_path)
             
             self.progress_updated.emit(30, "Extruding contours...")
             
@@ -539,9 +964,8 @@ class FreeCADWorker(QThread):
             import FreeCAD
             doc = FreeCAD.newDocument("DXF_Export")
             
-            # Import DXF
-            import Draft
-            Draft.importDXF(self.dxf_path)
+            # Import DXF using manual method (use current DXF path)
+            self._import_dxf_manually(doc, self.dxf_path)
             
             self.progress_updated.emit(30, "Extruding contours...")
             
@@ -599,7 +1023,8 @@ class DXFEditorDialog(QDialog):
     
     def __init__(self, dxf_path: str, contours: List, mm_per_px: float, parent=None):
         super().__init__(parent)
-        self.dxf_path = dxf_path
+        self.original_dxf_path = dxf_path  # Store original DXF path
+        self.current_dxf_path = dxf_path   # Current DXF being displayed
         self.contours = contours
         self.mm_per_px = mm_per_px
         
@@ -658,7 +1083,7 @@ class DXFEditorDialog(QDialog):
         file_info_group = QGroupBox("DXF File Information")
         file_info_layout = QVBoxLayout(file_info_group)
         
-        self.file_path_label = QLabel(f"File: {os.path.basename(self.dxf_path)}")
+        self.file_path_label = QLabel(f"File: {os.path.basename(self.current_dxf_path)}")
         self.file_size_label = QLabel("Size: Calculating...")
         self.contour_count_label = QLabel(f"Contours: {len(self.contours)}")
         
@@ -696,6 +1121,25 @@ class DXFEditorDialog(QDialog):
         """)
         self.convert_splines_btn.clicked.connect(self.convert_to_splines)
         spline_layout.addWidget(self.convert_splines_btn)
+        
+        # Reset button
+        self.reset_btn = QPushButton("Reset to Original DXF")
+        self.reset_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f44336;
+                color: white;
+                border: none;
+                padding: 10px;
+                font-size: 12px;
+                font-weight: bold;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #d32f2f;
+            }
+        """)
+        self.reset_btn.clicked.connect(self.reset_to_original)
+        spline_layout.addWidget(self.reset_btn)
         
         left_layout.addWidget(spline_group)
         
@@ -1059,7 +1503,7 @@ class DXFEditorDialog(QDialog):
     def load_dxf_info(self):
         """Load DXF file information"""
         try:
-            file_size = os.path.getsize(self.dxf_path)
+            file_size = os.path.getsize(self.current_dxf_path)
             self.file_size_label.setText(f"Size: {file_size:,} bytes")
         except Exception as e:
             self.file_size_label.setText(f"Size: Error - {str(e)}")
@@ -1067,6 +1511,17 @@ class DXFEditorDialog(QDialog):
     def convert_to_splines(self):
         """Start spline conversion"""
         self.start_operation("convert_splines")
+    
+    def reset_to_original(self):
+        """Reset to original DXF and reload preview"""
+        self.current_dxf_path = self.original_dxf_path
+        self.load_dxf_preview()
+        self.load_dxf_info()
+        
+        # Update file path label
+        self.file_path_label.setText(f"File: {os.path.basename(self.current_dxf_path)}")
+        
+        QMessageBox.information(self, "Reset Complete", "Preview reset to original DXF file.")
     
     def export_format(self, format_type):
         """Start export operation"""
@@ -1088,10 +1543,10 @@ class DXFEditorDialog(QDialog):
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
         
-        # Start worker
+        # Start worker (use current DXF path and pass dialog reference)
         self.worker = FreeCADWorker(
-            self.dxf_path, operation, self.extrude_height_spin.value(),
-            self.contours, self.img_size, self.mm_per_px
+            self.current_dxf_path, operation, self.extrude_height_spin.value(),
+            self.contours, self.img_size, self.mm_per_px, self
         )
         self.worker.progress_updated.connect(self.update_progress)
         self.worker.finished.connect(self.operation_finished)

@@ -40,3 +40,4 @@ typish==1.9.3
 tzdata==2025.2
 numba>=0.60.0
 multiprocessing-logging>=0.3.4
+scipy>=1.10.0

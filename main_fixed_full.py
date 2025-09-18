@@ -7,7 +7,7 @@ import os
 import traceback
 from PySide6.QtWidgets import (QApplication, QMessageBox, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                                QLabel, QPushButton, QFileDialog, QSlider, QSpinBox, QCheckBox, QGroupBox,
-                               QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QSplitter, QTabWidget)
+                               QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QSplitter, QTabWidget, QComboBox)
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont, QPixmap, QImage, QPainter
 
@@ -72,7 +72,7 @@ class SafeGraphicsView(QGraphicsView):
             print(f"Error setting image: {e}")
     
     def set_dxf_preview(self, contours, splines=None, use_splines=True, image_size=None, 
-                       show_original=False, show_contours=True, show_splines=True):
+                       show_original=False, show_contours=True, show_splines=True, spline_selection="All"):
         """Set DXF preview safely - with actual visual preview"""
         try:
             if not contours:
@@ -108,29 +108,47 @@ class SafeGraphicsView(QGraphicsView):
                     else:
                         contour_points = contour
                     
-                    # Draw contour in white
-                    cv2.drawContours(preview, [contour_points.astype(np.int32)], -1, (255, 255, 255), 2)
+                    # Draw each contour in white with different shades for visibility
+                    color_intensity = 200 + (i * 10) % 55  # Vary intensity slightly
+                    cv2.drawContours(preview, [contour_points.astype(np.int32)], -1, (color_intensity, color_intensity, color_intensity), 2)
             
             # Draw splines if requested and available
             if show_splines and splines:
-                for i, spline in enumerate(splines):
+                # Check if we should show all splines or just one
+                if spline_selection == "All":
+                    # Show all splines
+                    splines_to_show = splines
+                else:
+                    # Show only selected spline
+                    try:
+                        spline_index = int(spline_selection.split()[1]) - 1  # Extract number from "Spline X"
+                        if 0 <= spline_index < len(splines):
+                            splines_to_show = [splines[spline_index]]
+                        else:
+                            splines_to_show = []
+                    except (ValueError, IndexError):
+                        splines_to_show = splines
+                
+                for i, spline in enumerate(splines_to_show):
+                    # Convert to proper format for drawing
                     if len(spline.shape) == 2:
-                        # Convert to contour format for drawing
-                        spline_contour = spline.reshape(-1, 1, 2).astype(np.int32)
+                        # Already in point format
+                        spline_points = spline.astype(np.int32)
                     else:
-                        spline_contour = spline.astype(np.int32)
+                        # Convert from contour format
+                        spline_points = spline.reshape(-1, 2).astype(np.int32)
                     
                     # Draw spline as connected lines in green
-                    for j in range(len(spline_contour) - 1):
-                        pt1 = tuple(spline_contour[j][0])
-                        pt2 = tuple(spline_contour[j + 1][0])
-                        cv2.line(preview, pt1, pt2, (0, 255, 0), 2)  # Green for splines
+                    for j in range(len(spline_points) - 1):
+                        pt1 = tuple(spline_points[j])
+                        pt2 = tuple(spline_points[j + 1])
+                        cv2.line(preview, pt1, pt2, (0, 255, 0), 3)  # Green for splines, thicker
                     
                     # Close the spline
-                    if len(spline_contour) > 2:
-                        pt1 = tuple(spline_contour[-1][0])
-                        pt2 = tuple(spline_contour[0][0])
-                        cv2.line(preview, pt1, pt2, (0, 255, 0), 2)
+                    if len(spline_points) > 2:
+                        pt1 = tuple(spline_points[-1])
+                        pt2 = tuple(spline_points[0])
+                        cv2.line(preview, pt1, pt2, (0, 255, 0), 3)
             
             # Convert to QPixmap and display
             rgb_preview = cv2.cvtColor(preview, cv2.COLOR_BGR2RGB)
@@ -144,7 +162,7 @@ class SafeGraphicsView(QGraphicsView):
             # Fit in view
             self.fitInView(self.image_item, Qt.KeepAspectRatio)
             
-            print(f"DXF Preview: {len(contours)} contours, {len(splines) if splines else 0} splines")
+            print(f"🎨 DXF Preview: {len(contours)} individual contours, {len(splines) if splines else 0} individual splines")
             
         except Exception as e:
             print(f"Error in DXF preview: {e}")
@@ -442,9 +460,22 @@ class FixedImageEmbossWindow(QMainWindow):
         
         self.show_splines_checkbox = QCheckBox("Show Splines")
         self.show_splines_checkbox.setChecked(True)
+        self.show_splines_checkbox.toggled.connect(self.on_splines_toggled)
         controls_layout.addWidget(self.show_splines_checkbox)
         
         dxf_layout_group.addLayout(controls_layout)
+        
+        # Spline selector (only visible when splines are enabled)
+        spline_selector_layout = QHBoxLayout()
+        spline_selector_layout.addWidget(QLabel("Spline:"))
+        
+        self.spline_selector = QComboBox()
+        self.spline_selector.addItem("All")
+        self.spline_selector.currentTextChanged.connect(self.on_spline_selection_changed)
+        self.spline_selector.setVisible(True)  # Show by default since splines are enabled
+        spline_selector_layout.addWidget(self.spline_selector)
+        
+        dxf_layout_group.addLayout(spline_selector_layout)
         
         # Preview info
         self.preview_info_label = QLabel("Zoom: 100% | Contours: 0 | Splines: 0")
@@ -601,6 +632,26 @@ class FixedImageEmbossWindow(QMainWindow):
         if self.original_image is not None:
             self.processing_timer.start(500)  # 500ms delay
     
+    def on_splines_toggled(self, checked):
+        """Handle splines checkbox toggle"""
+        self.spline_selector.setVisible(checked)
+        self.display_dxf_preview()
+    
+    def on_spline_selection_changed(self, selection):
+        """Handle spline selection change"""
+        self.display_dxf_preview()
+    
+    def update_spline_selector(self):
+        """Update the spline selector with current splines"""
+        self.spline_selector.clear()
+        self.spline_selector.addItem("All")
+        
+        for i, spline in enumerate(self.current_splines):
+            self.spline_selector.addItem(f"Spline {i+1}")
+        
+        # Reset to "All" selection
+        self.spline_selector.setCurrentIndex(0)
+    
     def load_image(self):
         """Load image file"""
         try:
@@ -720,22 +771,42 @@ class FixedImageEmbossWindow(QMainWindow):
             else:
                 self.current_contours = []
             
-            # Generate splines
+            # Generate smooth splines - ONE PER CONTOUR
             self.current_splines = []
-            for contour in self.current_contours:
+            for i, contour in enumerate(self.current_contours):
                 if len(contour) >= 4:
-                    points = contour.reshape(-1, 2)
-                    if len(points) > 20:
-                        # Sample points for large contours
-                        step = len(points) / 20
-                        sampled_points = []
-                        for j in range(20):
-                            idx = int(j * step)
-                            if idx < len(points):
-                                sampled_points.append(points[idx])
-                        self.current_splines.append(np.array(sampled_points))
-                    else:
+                    try:
+                        print(f"🔄 Processing contour {i+1}/{len(self.current_contours)}...")
+                        
+                        # Extract points from contour
+                        points = contour.reshape(-1, 2).astype(np.float32)
+                        
+                        # Ensure contour is properly closed
+                        points = self._ensure_contour_closed(points)
+                        
+                        # Generate smooth spline for THIS contour only
+                        if self.params['use_splines']:
+                            smooth_spline = self._create_smooth_spline_for_contour(points, i)
+                            if smooth_spline is not None:
+                                self.current_splines.append(smooth_spline)
+                                print(f"✅ Contour {i+1}: Generated smooth spline with {len(smooth_spline)} points")
+                            else:
+                                # Fallback to original points
+                                self.current_splines.append(points)
+                                print(f"⚠️ Contour {i+1}: Using original points (spline failed)")
+                        else:
+                            # Use original points without smoothing
+                            self.current_splines.append(points)
+                            print(f"📝 Contour {i+1}: Using original points (splines disabled)")
+                            
+                    except Exception as e:
+                        print(f"❌ Error processing contour {i+1}: {e}")
+                        # Fallback to original points
+                        points = contour.reshape(-1, 2)
                         self.current_splines.append(points)
+            
+            # Update spline selector
+            self.update_spline_selector()
             
             # Display DXF preview
             self.display_dxf_preview()
@@ -747,6 +818,258 @@ class FixedImageEmbossWindow(QMainWindow):
         except Exception as e:
             print(f"Error processing image: {e}")
             traceback.print_exc()
+    
+    def _ensure_contour_closed(self, points):
+        """Ensure contour is properly closed"""
+        import numpy as np
+        
+        if len(points) < 3:
+            return points
+        
+        # Check if already closed (within tolerance)
+        start_point = points[0]
+        end_point = points[-1]
+        distance = np.sqrt((start_point[0] - end_point[0])**2 + (start_point[1] - end_point[1])**2)
+        
+        if distance > 2.0:  # Not closed, add closing point
+            points = np.vstack([points, start_point])
+        
+        return points
+    
+    def _create_smooth_spline_for_contour(self, points, contour_index):
+        """Create smooth spline by fitting to individual line segments"""
+        try:
+            import numpy as np
+            
+            print(f"  📐 Contour {contour_index+1}: {len(points)} input points")
+            
+            # Clean the points
+            cleaned_points = self._remove_duplicate_points(points)
+            print(f"  📐 Cleaned to {len(cleaned_points)} points")
+            
+            # Instead of one big spline, create a spline that follows the line segments
+            # by using the original points with minimal smoothing
+            spline_points = self._create_segment_following_spline(cleaned_points)
+            
+            # Convert to contour format
+            spline_contour = np.array(spline_points, dtype=np.int32)
+            
+            # Ensure the spline is properly closed
+            spline_contour = self._ensure_contour_closed(spline_contour)
+            
+            print(f"  ✅ Generated {len(spline_contour)} spline points (segment-following)")
+            return spline_contour
+            
+        except Exception as e:
+            print(f"⚠️ Spline creation failed for contour {contour_index+1}: {e}")
+            return self._simple_smooth(points)
+    
+    def _create_segment_following_spline(self, points):
+        """Create spline that just smooths pixel jaggedness without changing geometry"""
+        try:
+            import numpy as np
+            
+            if len(points) < 3:
+                return points.tolist()
+            
+            # Simple approach: just smooth the pixel jaggedness with a small moving average
+            # This preserves the exact geometry but removes pixel noise
+            smoothed_points = []
+            
+            for i in range(len(points)):
+                if i == 0 or i == len(points) - 1:
+                    # Keep first and last points unchanged
+                    smoothed_points.append(points[i].tolist())
+                else:
+                    # Simple 3-point moving average to smooth pixel jaggedness
+                    x = (points[i-1][0] + points[i][0] + points[i+1][0]) / 3.0
+                    y = (points[i-1][1] + points[i][1] + points[i+1][1]) / 3.0
+                    smoothed_points.append([x, y])
+            
+            return smoothed_points
+            
+        except Exception as e:
+            print(f"⚠️ Simple smoothing failed: {e}")
+            # Fallback to original points
+            return points.tolist()
+    
+    def _remove_duplicate_points(self, points):
+        """Remove consecutive duplicate points"""
+        import numpy as np
+        
+        if len(points) < 2:
+            return points
+        
+        # Calculate distances between consecutive points
+        distances = np.sqrt(np.sum(np.diff(points, axis=0)**2, axis=1))
+        
+        # Keep points that are far enough apart (tolerance of 1 pixel)
+        keep_indices = [0]  # Always keep first point
+        for i, dist in enumerate(distances):
+            if dist > 1.0:  # Keep point if it's more than 1 pixel away from previous
+                keep_indices.append(i + 1)
+        
+        return points[keep_indices]
+    
+    def _simplify_contour_intelligently(self, points):
+        """Simplify contour while preserving important geometric features"""
+        try:
+            import numpy as np
+            
+            if len(points) < 10:
+                return points
+            
+            # Use Douglas-Peucker algorithm with adaptive epsilon
+            # Calculate average distance between consecutive points
+            distances = np.sqrt(np.sum(np.diff(points, axis=0)**2, axis=1))
+            avg_distance = np.mean(distances)
+            
+            # Use epsilon based on average distance (preserve detail)
+            epsilon = avg_distance * 0.5
+            
+            # Apply Douglas-Peucker simplification
+            simplified = self._douglas_peucker(points, epsilon)
+            
+            return np.array(simplified, dtype=np.float32)
+            
+        except Exception as e:
+            print(f"⚠️ Contour simplification failed: {e}")
+            return points
+    
+    def _douglas_peucker(self, points, epsilon):
+        """Douglas-Peucker line simplification algorithm"""
+        if len(points) <= 2:
+            return points
+        
+        # Find the point with maximum distance from line between first and last points
+        start, end = points[0], points[-1]
+        max_dist = 0
+        max_index = 0
+        
+        for i in range(1, len(points) - 1):
+            dist = self._point_to_line_distance(points[i], start, end)
+            if dist > max_dist:
+                max_dist = dist
+                max_index = i
+        
+        # If max distance is greater than epsilon, recursively simplify
+        if max_dist > epsilon:
+            # Recursive call on both segments
+            left = self._douglas_peucker(points[:max_index + 1], epsilon)
+            right = self._douglas_peucker(points[max_index:], epsilon)
+            
+            # Combine results (remove duplicate middle point)
+            return np.vstack([left[:-1], right])
+        else:
+            # All points are close to the line, return just start and end
+            return np.array([start, end])
+    
+    def _point_to_line_distance(self, point, line_start, line_end):
+        """Calculate perpendicular distance from point to line"""
+        import numpy as np
+        
+        # Vector from line_start to line_end
+        line_vec = line_end - line_start
+        # Vector from line_start to point
+        point_vec = point - line_start
+        
+        # Project point_vec onto line_vec
+        line_len_sq = np.dot(line_vec, line_vec)
+        if line_len_sq == 0:
+            return np.linalg.norm(point_vec)
+        
+        proj_length = np.dot(point_vec, line_vec) / line_len_sq
+        proj_point = line_start + proj_length * line_vec
+        
+        # Distance from point to projection
+        return np.linalg.norm(point - proj_point)
+    
+    def _calculate_curvature(self, points):
+        """Calculate curvature at each point to determine spline density"""
+        try:
+            import numpy as np
+            
+            if len(points) < 3:
+                return np.zeros(len(points))
+            
+            curvatures = np.zeros(len(points))
+            
+            for i in range(1, len(points) - 1):
+                # Get three consecutive points
+                p1, p2, p3 = points[i-1], points[i], points[i+1]
+                
+                # Calculate vectors
+                v1 = p2 - p1
+                v2 = p3 - p2
+                
+                # Calculate angle between vectors (curvature indicator)
+                norm1 = np.linalg.norm(v1)
+                norm2 = np.linalg.norm(v2)
+                
+                if norm1 > 0 and norm2 > 0:
+                    cos_angle = np.dot(v1, v2) / (norm1 * norm2)
+                    cos_angle = np.clip(cos_angle, -1, 1)  # Avoid numerical errors
+                    angle = np.arccos(cos_angle)
+                    curvatures[i] = angle
+            
+            return curvatures
+            
+        except Exception as e:
+            print(f"⚠️ Curvature calculation failed: {e}")
+            return np.zeros(len(points))
+    
+    def _create_adaptive_spline_points(self, points, curvatures):
+        """Create spline points with adaptive density based on curvature"""
+        try:
+            import numpy as np
+            
+            if len(points) < 3:
+                return points
+            
+            adaptive_points = []
+            
+            for i in range(len(points)):
+                adaptive_points.append(points[i])
+                
+                # Add extra points in high curvature areas
+                if i < len(curvatures) - 1 and curvatures[i] > np.pi / 4:  # High curvature threshold
+                    # Add intermediate points for smoother curves
+                    if i < len(points) - 1:
+                        mid_point = (points[i] + points[i + 1]) / 2
+                        adaptive_points.append(mid_point)
+            
+            return np.array(adaptive_points, dtype=np.float32)
+            
+        except Exception as e:
+            print(f"⚠️ Adaptive point creation failed: {e}")
+            return points
+    
+    def _simple_smooth(self, points):
+        """Simple smoothing fallback when scipy is not available"""
+        try:
+            import numpy as np
+            
+            # Simple moving average smoothing
+            if len(points) < 5:
+                return points
+            
+            smoothed = []
+            window_size = 3
+            
+            for i in range(len(points)):
+                start = max(0, i - window_size // 2)
+                end = min(len(points), i + window_size // 2 + 1)
+                window_points = points[start:end]
+                
+                avg_x = np.mean(window_points[:, 0])
+                avg_y = np.mean(window_points[:, 1])
+                smoothed.append([avg_x, avg_y])
+            
+            return np.array(smoothed, dtype=np.int32)
+            
+        except Exception as e:
+            print(f"⚠️ Simple smoothing failed: {e}")
+            return points
     
     def display_dxf_preview(self):
         """Display DXF preview safely"""
@@ -761,6 +1084,7 @@ class FixedImageEmbossWindow(QMainWindow):
             # Safe DXF preview with checkbox states
             if self.original_image is not None:
                 image_size = self.original_image.shape[:2]
+                current_selection = self.spline_selector.currentText()
                 self.dxf_view.set_dxf_preview(
                     self.current_contours, 
                     self.current_splines, 
@@ -768,7 +1092,8 @@ class FixedImageEmbossWindow(QMainWindow):
                     image_size,
                     show_original=self.show_original_checkbox.isChecked(),
                     show_contours=self.show_contours_checkbox.isChecked(),
-                    show_splines=self.show_splines_checkbox.isChecked()
+                    show_splines=self.show_splines_checkbox.isChecked(),
+                    spline_selection=current_selection
                 )
             
         except Exception as e:
@@ -801,18 +1126,54 @@ class FixedImageEmbossWindow(QMainWindow):
             
             h, w = self.original_image.shape[:2]
             
-            for contour in self.current_contours:
-                points = []
-                for point in contour:
-                    x, y = point[0]
-                    # Convert to DXF coordinates
-                    dxf_x = x * self.params['mm_per_px']
-                    dxf_y = (h - y) * self.params['mm_per_px']
-                    points.append((dxf_x, dxf_y))
-                
-                if len(points) >= 3:
-                    polyline = msp.add_lwpolyline(points)
-                    polyline.closed = True
+            # Export splines if available and enabled, otherwise export contours
+            if self.params['use_splines'] and self.current_splines:
+                # Export smooth splines
+                for i, spline in enumerate(self.current_splines):
+                    try:
+                        points = []
+                        for point in spline:
+                            if len(point.shape) == 1:
+                                x, y = point[0], point[1]
+                            else:
+                                x, y = point[0]
+                            
+                            # Convert to DXF coordinates
+                            dxf_x = x * self.params['mm_per_px']
+                            dxf_y = (h - y) * self.params['mm_per_px']
+                            points.append((dxf_x, dxf_y))
+                        
+                        if len(points) >= 3:
+                            if len(points) >= 4:
+                                # Try to create B-spline
+                                try:
+                                    spline_entity = msp.add_spline(points)
+                                    spline_entity.closed = True
+                                except:
+                                    # Fallback to polyline
+                                    polyline = msp.add_lwpolyline(points)
+                                    polyline.closed = True
+                            else:
+                                # Use polyline for simple shapes
+                                polyline = msp.add_lwpolyline(points)
+                                polyline.closed = True
+                    except Exception as e:
+                        print(f"Error exporting spline {i}: {e}")
+                        continue
+            else:
+                # Export raw contours
+                for contour in self.current_contours:
+                    points = []
+                    for point in contour:
+                        x, y = point[0]
+                        # Convert to DXF coordinates
+                        dxf_x = x * self.params['mm_per_px']
+                        dxf_y = (h - y) * self.params['mm_per_px']
+                        points.append((dxf_x, dxf_y))
+                    
+                    if len(points) >= 3:
+                        polyline = msp.add_lwpolyline(points)
+                        polyline.closed = True
             
             doc.saveas(output_path)
             

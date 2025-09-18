@@ -49,9 +49,9 @@ class SimpleGraphicsView(QGraphicsView):
             # Convert numpy array to QPixmap
             height, width = image.shape[:2]
             if len(image.shape) == 3:
-                # Color image
+                # Color image (already converted to RGB)
                 bytes_per_line = 3 * width
-                q_image = QImage(image.data, width, height, bytes_per_line, QImage.Format_RGB888).rgbSwapped()
+                q_image = QImage(image.data, width, height, bytes_per_line, QImage.Format_RGB888)
             else:
                 # Grayscale image
                 bytes_per_line = width

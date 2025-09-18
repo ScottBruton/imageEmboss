@@ -69,7 +69,7 @@ class ImageEmbossMainWindow(QMainWindow):
         splitter.addWidget(right_panel)
         
         # Set splitter proportions - make left panel bigger for original image
-        splitter.setSizes([600, 1000])  # Left panel gets more space
+        splitter.setSizes([700, 1000])  # Left panel gets more space for sliders
         splitter.setStretchFactor(0, 1)  # Left panel can stretch
         splitter.setStretchFactor(1, 2)  # Right panel gets more stretch
     
@@ -86,6 +86,7 @@ class ImageEmbossMainWindow(QMainWindow):
         
         # Parameter panel
         self.parameter_panel = ParameterPanel()
+        self.parameter_panel.setMinimumHeight(400)  # Ensure enough space for sliders
         layout.addWidget(self.parameter_panel)
         
         return panel

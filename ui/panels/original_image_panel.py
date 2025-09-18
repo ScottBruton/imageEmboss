@@ -132,6 +132,9 @@ class OriginalImagePanel(QWidget):
                 self.show_error("Could not load image file")
                 return
             
+            # Convert BGR to RGB for proper color display
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            
             # Store image data
             self.current_image_path = image_path
             self.original_image = image

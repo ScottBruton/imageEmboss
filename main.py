@@ -7,7 +7,7 @@ import os
 import traceback
 from PySide6.QtWidgets import (QApplication, QMessageBox, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                                QLabel, QPushButton, QFileDialog, QSlider, QSpinBox, QCheckBox, QGroupBox,
-                               QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QSplitter, QTabWidget, QComboBox)
+                               QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QSplitter, QTabWidget, QComboBox, QFrame)
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont, QPixmap, QImage, QPainter
 
@@ -58,9 +58,9 @@ class SafeGraphicsView(QGraphicsView):
             # Convert numpy array to QPixmap
             height, width = image.shape[:2]
             if len(image.shape) == 3:
-                # Color image
+                # Color image (already in RGB format)
                 bytes_per_line = 3 * width
-                q_image = QImage(image.data, width, height, bytes_per_line, QImage.Format_RGB888).rgbSwapped()
+                q_image = QImage(image.data, width, height, bytes_per_line, QImage.Format_RGB888)
             else:
                 # Grayscale image
                 bytes_per_line = width
@@ -354,10 +354,10 @@ class FixedImageEmbossWindow(QMainWindow):
         right_panel = self.create_right_panel()
         splitter.addWidget(right_panel)
         
-        # Set splitter proportions
-        splitter.setSizes([600, 1000])
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 2)
+        # Set splitter proportions - give more space to left panel for vertical sliders
+        splitter.setSizes([800, 800])  # More balanced sizes
+        splitter.setStretchFactor(0, 1)  # Left panel can stretch
+        splitter.setStretchFactor(1, 1)  # Right panel gets less stretch
         
         # Connect checkbox signals for preview updates
         self.show_original_checkbox.toggled.connect(self.display_dxf_preview)
@@ -370,19 +370,19 @@ class FixedImageEmbossWindow(QMainWindow):
         layout = QVBoxLayout(panel)
         layout.setSpacing(10)
         
-        # File selection
-        file_group = QGroupBox("File Selection")
-        file_layout = QVBoxLayout(file_group)
+        # Compact file selection at top
+        file_layout = QHBoxLayout()
         
-        self.load_btn = QPushButton("📁 Select Image")
+        self.load_btn = QPushButton("📁 Select")
         self.load_btn.setStyleSheet("""
             QPushButton {
                 background-color: #4CAF50;
                 color: white;
                 border: none;
-                padding: 10px;
-                border-radius: 5px;
+                padding: 5px 10px;
+                border-radius: 3px;
                 font-weight: bold;
+                font-size: 11px;
             }
             QPushButton:hover { background-color: #45a049; }
         """)
@@ -390,15 +390,16 @@ class FixedImageEmbossWindow(QMainWindow):
         file_layout.addWidget(self.load_btn)
         
         # Process button
-        self.process_btn = QPushButton("🔄 Process Image")
+        self.process_btn = QPushButton("🔄 Process")
         self.process_btn.setStyleSheet("""
             QPushButton {
                 background-color: #FF9800;
                 color: white;
                 border: none;
-                padding: 10px;
-                border-radius: 5px;
+                padding: 5px 10px;
+                border-radius: 3px;
                 font-weight: bold;
+                font-size: 11px;
             }
             QPushButton:hover { background-color: #F57C00; }
             QPushButton:disabled { background-color: #cccccc; }
@@ -407,20 +408,18 @@ class FixedImageEmbossWindow(QMainWindow):
         self.process_btn.setEnabled(False)
         file_layout.addWidget(self.process_btn)
         
-        
         self.file_label = QLabel("No image loaded")
-        self.file_label.setStyleSheet("color: #666; font-style: italic;")
-        self.file_label.setWordWrap(True)
+        self.file_label.setStyleSheet("color: #666; font-style: italic; font-size: 10px;")
         file_layout.addWidget(self.file_label)
         
-        layout.addWidget(file_group)
+        layout.addLayout(file_layout)
         
         # Original image display
         original_group = QGroupBox("Original Image")
         original_layout = QVBoxLayout(original_group)
         
         self.original_view = SafeGraphicsView()
-        self.original_view.setMinimumSize(400, 300)
+        self.original_view.setMinimumSize(500, 400)  # Larger image display
         original_layout.addWidget(self.original_view)
         
         # Image info
@@ -430,49 +429,76 @@ class FixedImageEmbossWindow(QMainWindow):
         
         layout.addWidget(original_group)
         
-        # Processing parameters
+        # Processing parameters - organized with horizontal headers
         params_group = QGroupBox("Processing Parameters")
         params_layout = QVBoxLayout(params_group)
+        params_layout.setSpacing(10)
         
-        # Bilateral filter
-        bilateral_group = QGroupBox("Bilateral Filter")
-        bilateral_layout = QVBoxLayout(bilateral_group)
+        # Horizontal header row
+        header_layout = QHBoxLayout()
+        header_layout.setSpacing(20)
+        
+        bilateral_header = QLabel("Bilateral Filter")
+        bilateral_header.setAlignment(Qt.AlignCenter)
+        bilateral_header.setStyleSheet("font-weight: bold; color: #4CAF50; font-size: 12px;")
+        header_layout.addWidget(bilateral_header)
+        
+        edge_header = QLabel("Edge Detection")
+        edge_header.setAlignment(Qt.AlignCenter)
+        edge_header.setStyleSheet("font-weight: bold; color: #FF9800; font-size: 12px;")
+        header_layout.addWidget(edge_header)
+        
+        contour_header = QLabel("Contour Processing")
+        contour_header.setAlignment(Qt.AlignCenter)
+        contour_header.setStyleSheet("font-weight: bold; color: #2196F3; font-size: 12px;")
+        header_layout.addWidget(contour_header)
+        
+        params_layout.addLayout(header_layout)
+        
+        # Horizontal sliders row
+        sliders_layout = QHBoxLayout()
+        sliders_layout.setSpacing(20)
+        
+        # Bilateral filter sliders
+        bilateral_sliders = QVBoxLayout()
+        bilateral_sliders.setSpacing(8)
         
         self.bilateral_d_slider = self.create_slider("Diameter:", 1, 25, self.params['bilateral_d'])
-        bilateral_layout.addWidget(self.bilateral_d_slider)
+        bilateral_sliders.addWidget(self.bilateral_d_slider)
         
         self.bilateral_c_slider = self.create_slider("Color Sigma:", 10, 200, self.params['bilateral_c'])
-        bilateral_layout.addWidget(self.bilateral_c_slider)
+        bilateral_sliders.addWidget(self.bilateral_c_slider)
         
-        params_layout.addWidget(bilateral_group)
+        sliders_layout.addLayout(bilateral_sliders)
         
-        # Edge detection
-        edge_group = QGroupBox("Edge Detection")
-        edge_layout = QVBoxLayout(edge_group)
+        # Edge detection sliders
+        edge_sliders = QVBoxLayout()
+        edge_sliders.setSpacing(8)
         
         self.canny_low_slider = self.create_slider("Canny Low:", 10, 200, self.params['canny_low'])
-        edge_layout.addWidget(self.canny_low_slider)
+        edge_sliders.addWidget(self.canny_low_slider)
         
         self.canny_high_slider = self.create_slider("Canny High:", 50, 300, self.params['canny_high'])
-        edge_layout.addWidget(self.canny_high_slider)
+        edge_sliders.addWidget(self.canny_high_slider)
         
-        params_layout.addWidget(edge_group)
+        sliders_layout.addLayout(edge_sliders)
         
-        # Contour processing
-        contour_group = QGroupBox("Contour Processing")
-        contour_layout = QVBoxLayout(contour_group)
+        # Contour processing sliders
+        contour_sliders = QVBoxLayout()
+        contour_sliders.setSpacing(8)
         
         self.largest_n_slider = self.create_slider("Largest N:", 1, 20, self.params['largest_n'])
-        contour_layout.addWidget(self.largest_n_slider)
+        contour_sliders.addWidget(self.largest_n_slider)
         
         self.simplify_slider = self.create_slider("Simplify %:", 0, 100, int(self.params['simplify_pct'] * 100))
-        contour_layout.addWidget(self.simplify_slider)
+        contour_sliders.addWidget(self.simplify_slider)
         
-        # Add minimum area filter
         self.min_area_slider = self.create_slider("Min Area:", 100, 10000, 1000)
-        contour_layout.addWidget(self.min_area_slider)
+        contour_sliders.addWidget(self.min_area_slider)
         
-        params_layout.addWidget(contour_group)
+        sliders_layout.addLayout(contour_sliders)
+        
+        params_layout.addLayout(sliders_layout)
         
         layout.addWidget(params_group)
         
@@ -655,25 +681,40 @@ class FixedImageEmbossWindow(QMainWindow):
         return panel
     
     def create_slider(self, label_text, min_val, max_val, default_val):
-        """Create a parameter slider"""
+        """Create a vertical parameter slider"""
         widget = QWidget()
-        layout = QHBoxLayout(widget)
-        layout.setContentsMargins(0, 0, 0, 0)
+        widget.setMinimumHeight(120)  # More height for longer sliders
+        widget.setMaximumHeight(140)  # Limit height
+        layout = QVBoxLayout(widget)  # Vertical layout
+        layout.setContentsMargins(5, 5, 5, 5)  # Add proper margins
+        layout.setSpacing(5)  # Add spacing between elements
         
+        # Label at top
         label = QLabel(label_text)
-        label.setMinimumWidth(100)
+        label.setAlignment(Qt.AlignCenter)
+        label.setStyleSheet("font-weight: bold; color: #333; font-size: 10px;")
         layout.addWidget(label)
         
-        slider = QSlider(Qt.Horizontal)
+        # Horizontal layout for slider and value
+        slider_layout = QHBoxLayout()
+        
+        # Vertical slider - make it longer
+        slider = QSlider(Qt.Vertical)
         slider.setRange(min_val, max_val)
         slider.setValue(default_val)
+        slider.setMinimumHeight(80)  # Longer slider for better control
+        slider.setMaximumHeight(100)  # Consistent height
         slider.valueChanged.connect(self.on_param_change)
-        layout.addWidget(slider)
+        slider_layout.addWidget(slider)
         
+        # Value label next to slider
         value_label = QLabel(str(default_val))
-        value_label.setMinimumWidth(30)
-        value_label.setAlignment(Qt.AlignRight)
-        layout.addWidget(value_label)
+        value_label.setMinimumWidth(35)
+        value_label.setAlignment(Qt.AlignCenter)
+        value_label.setStyleSheet("font-weight: bold; color: #666; font-size: 11px;")
+        slider_layout.addWidget(value_label)
+        
+        layout.addLayout(slider_layout)
         
         # Connect slider to value label
         def update_label(value):
@@ -749,6 +790,9 @@ class FixedImageEmbossWindow(QMainWindow):
                 # Load image
                 import cv2
                 self.original_image = cv2.imread(file_path)
+                if self.original_image is not None:
+                    # Convert BGR to RGB for proper display
+                    self.original_image = cv2.cvtColor(self.original_image, cv2.COLOR_BGR2RGB)
                 
                 if self.original_image is not None:
                     # Display original image
@@ -771,10 +815,8 @@ class FixedImageEmbossWindow(QMainWindow):
             if self.original_image is None:
                 return
             
-            # Convert BGR to RGB
-            import cv2
-            rgb_image = cv2.cvtColor(self.original_image, cv2.COLOR_BGR2RGB)
-            self.original_view.set_image(rgb_image)
+            # Image is already in RGB format
+            self.original_view.set_image(self.original_image)
             
             # Update image info
             h, w = self.original_image.shape[:2]
@@ -792,8 +834,8 @@ class FixedImageEmbossWindow(QMainWindow):
             import cv2
             import numpy as np
             
-            # Convert to grayscale
-            gray = cv2.cvtColor(self.original_image, cv2.COLOR_BGR2GRAY)
+            # Convert to grayscale (image is in RGB format)
+            gray = cv2.cvtColor(self.original_image, cv2.COLOR_RGB2GRAY)
             
             # Apply bilateral filter
             filtered = cv2.bilateralFilter(

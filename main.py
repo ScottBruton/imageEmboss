@@ -434,6 +434,24 @@ class FixedImageEmbossWindow(QMainWindow):
         params_layout = QVBoxLayout(params_group)
         params_layout.setSpacing(10)
         
+        # Preset selector
+        preset_layout = QHBoxLayout()
+        preset_label = QLabel("Preset:")
+        preset_label.setStyleSheet("font-weight: bold; color: #333;")
+        preset_layout.addWidget(preset_label)
+        
+        self.preset_combo = QComboBox()
+        self.preset_combo.addItems([
+            "Custom", "People", "Outdoors", "Indoors", "Portraits", 
+            "Animals", "High Detail", "Ultra Detail", "Selfies", "Architecture", "Nature"
+        ])
+        self.preset_combo.setCurrentText("Custom")
+        self.preset_combo.currentTextChanged.connect(self.on_preset_changed)
+        preset_layout.addWidget(self.preset_combo)
+        
+        preset_layout.addStretch()  # Push to left
+        params_layout.addLayout(preset_layout)
+        
         # Horizontal header row
         header_layout = QHBoxLayout()
         header_layout.setSpacing(20)
@@ -463,11 +481,14 @@ class FixedImageEmbossWindow(QMainWindow):
         bilateral_sliders = QVBoxLayout()
         bilateral_sliders.setSpacing(8)
         
-        self.bilateral_d_slider = self.create_slider("Diameter:", 1, 25, self.params['bilateral_d'])
+        self.bilateral_d_slider = self.create_horizontal_slider("Diameter:", 1, 25, self.params['bilateral_d'])
         bilateral_sliders.addWidget(self.bilateral_d_slider)
         
-        self.bilateral_c_slider = self.create_slider("Color Sigma:", 10, 200, self.params['bilateral_c'])
+        self.bilateral_c_slider = self.create_horizontal_slider("Color Sigma:", 10, 200, self.params['bilateral_c'])
         bilateral_sliders.addWidget(self.bilateral_c_slider)
+        
+        self.bilateral_sigma_slider = self.create_horizontal_slider("Space Sigma:", 10, 200, self.params['bilateral_sigma'])
+        bilateral_sliders.addWidget(self.bilateral_sigma_slider)
         
         sliders_layout.addLayout(bilateral_sliders)
         
@@ -475,26 +496,33 @@ class FixedImageEmbossWindow(QMainWindow):
         edge_sliders = QVBoxLayout()
         edge_sliders.setSpacing(8)
         
-        self.canny_low_slider = self.create_slider("Canny Low:", 10, 200, self.params['canny_low'])
+        self.canny_low_slider = self.create_horizontal_slider("Canny Low:", 10, 200, self.params['canny_low'])
         edge_sliders.addWidget(self.canny_low_slider)
         
-        self.canny_high_slider = self.create_slider("Canny High:", 50, 300, self.params['canny_high'])
+        self.canny_high_slider = self.create_horizontal_slider("Canny High:", 50, 300, self.params['canny_high'])
         edge_sliders.addWidget(self.canny_high_slider)
         
         sliders_layout.addLayout(edge_sliders)
         
         # Contour processing sliders
         contour_sliders = QVBoxLayout()
-        contour_sliders.setSpacing(8)
+        contour_sliders.setSpacing(15)  # Extra spacing since this section has the most sliders
         
-        self.largest_n_slider = self.create_slider("Largest N:", 1, 20, self.params['largest_n'])
+        self.largest_n_slider = self.create_horizontal_slider("Largest N:", 1, 20, self.params['largest_n'])
         contour_sliders.addWidget(self.largest_n_slider)
         
-        self.simplify_slider = self.create_slider("Simplify %:", 0, 100, int(self.params['simplify_pct'] * 100))
+        self.simplify_slider = self.create_horizontal_slider("Simplify %:", 0, 100, int(self.params['simplify_pct'] * 100))
         contour_sliders.addWidget(self.simplify_slider)
         
-        self.min_area_slider = self.create_slider("Min Area:", 100, 10000, 1000)
+        self.min_area_slider = self.create_horizontal_slider("Min Area:", 0, 10000, 1000)
         contour_sliders.addWidget(self.min_area_slider)
+        
+        # Add more processing options
+        self.gaussian_kernel_slider = self.create_horizontal_slider("Gaussian:", 3, 15, 5)
+        contour_sliders.addWidget(self.gaussian_kernel_slider)
+        
+        self.edge_thickness_slider = self.create_horizontal_slider("Edge Thick:", 1, 10, 3)
+        contour_sliders.addWidget(self.edge_thickness_slider)
         
         sliders_layout.addLayout(contour_sliders)
         
@@ -502,24 +530,49 @@ class FixedImageEmbossWindow(QMainWindow):
         
         layout.addWidget(params_group)
         
-        # Export settings
-        export_group = QGroupBox("Export Settings")
-        export_layout = QVBoxLayout(export_group)
+        # Add spacing between Processing Parameters and Export Settings
+        layout.addSpacing(15)
         
+        # Export settings - inline layout
+        export_group = QGroupBox("Export Settings")
+        export_layout = QHBoxLayout(export_group)
+        export_layout.setSpacing(15)
+        
+        # Scale setting
+        scale_layout = QHBoxLayout()
+        scale_layout.addWidget(QLabel("Scale:"))
         self.mm_per_px_spin = QSpinBox()
         self.mm_per_px_spin.setRange(1, 1000)
         self.mm_per_px_spin.setValue(int(self.params['mm_per_px'] * 1000))
         self.mm_per_px_spin.setSuffix(" mm/1000px")
-        export_layout.addWidget(QLabel("Scale:"))
-        export_layout.addWidget(self.mm_per_px_spin)
+        self.mm_per_px_spin.valueChanged.connect(self.on_param_change)
+        scale_layout.addWidget(self.mm_per_px_spin)
+        export_layout.addLayout(scale_layout)
         
+        # Divider
+        divider1 = QFrame()
+        divider1.setFrameShape(QFrame.VLine)
+        divider1.setFrameShadow(QFrame.Sunken)
+        export_layout.addWidget(divider1)
+        
+        # Checkboxes
         self.use_splines_checkbox = QCheckBox("Use Splines")
         self.use_splines_checkbox.setChecked(self.params['use_splines'])
+        self.use_splines_checkbox.toggled.connect(self.on_splines_toggled)
         export_layout.addWidget(self.use_splines_checkbox)
+        
+        # Divider
+        divider2 = QFrame()
+        divider2.setFrameShape(QFrame.VLine)
+        divider2.setFrameShadow(QFrame.Sunken)
+        export_layout.addWidget(divider2)
         
         self.invert_checkbox = QCheckBox("Invert Image")
         self.invert_checkbox.setChecked(self.params.get('invert', True))
+        self.invert_checkbox.toggled.connect(self.on_param_change)
         export_layout.addWidget(self.invert_checkbox)
+        
+        export_layout.addStretch()
         
         layout.addWidget(export_group)
         
@@ -723,6 +776,134 @@ class FixedImageEmbossWindow(QMainWindow):
         
         return widget
     
+    def create_horizontal_slider(self, label_text, min_val, max_val, default_val):
+        """Create a horizontal parameter slider with pill background on label"""
+        widget = QWidget()
+        widget.setMinimumHeight(60)  # Compact height for horizontal layout
+        widget.setMaximumHeight(80)
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(5)
+        
+        # Label with pill background
+        label = QLabel(label_text)
+        label.setAlignment(Qt.AlignCenter)
+        label.setStyleSheet("""
+            font-weight: bold; 
+            color: #333; 
+            font-size: 10px;
+            background-color: #E0E0E0;
+            border-radius: 12px;
+            padding: 4px 8px;
+        """)
+        layout.addWidget(label)
+        
+        # Horizontal layout for slider and value
+        slider_layout = QHBoxLayout()
+        
+        # Horizontal slider
+        slider = QSlider(Qt.Horizontal)
+        slider.setRange(min_val, max_val)
+        slider.setValue(default_val)
+        slider.setMinimumHeight(25)
+        slider.valueChanged.connect(self.on_param_change)
+        slider_layout.addWidget(slider)
+        
+        # Value label next to slider
+        value_label = QLabel(str(default_val))
+        value_label.setMinimumWidth(35)
+        value_label.setAlignment(Qt.AlignCenter)
+        value_label.setStyleSheet("font-weight: bold; color: #666; font-size: 11px;")
+        slider_layout.addWidget(value_label)
+        
+        layout.addLayout(slider_layout)
+        
+        # Connect slider to value label
+        def update_label(value):
+            value_label.setText(str(value))
+        slider.valueChanged.connect(update_label)
+        
+        return widget
+    
+    def on_preset_changed(self, preset_name):
+        """Handle preset selection"""
+        if preset_name == "Custom":
+            return  # Don't change anything for custom
+        
+        # Define presets
+        presets = {
+            "People": {
+                'bilateral_d': 9, 'bilateral_c': 75, 'bilateral_sigma': 75,
+                'canny_low': 30, 'canny_high': 100, 'largest_n': 8,
+                'simplify_pct': 0.1, 'min_area': 500, 'gaussian_kernel': 5, 'edge_thickness': 2
+            },
+            "Outdoors": {
+                'bilateral_d': 11, 'bilateral_c': 80, 'bilateral_sigma': 80,
+                'canny_low': 25, 'canny_high': 90, 'largest_n': 12,
+                'simplify_pct': 0.2, 'min_area': 300, 'gaussian_kernel': 5, 'edge_thickness': 3
+            },
+            "Indoors": {
+                'bilateral_d': 7, 'bilateral_c': 60, 'bilateral_sigma': 60,
+                'canny_low': 40, 'canny_high': 120, 'largest_n': 6,
+                'simplify_pct': 0.15, 'min_area': 800, 'gaussian_kernel': 3, 'edge_thickness': 2
+            },
+            "Portraits": {
+                'bilateral_d': 3, 'bilateral_c': 30, 'bilateral_sigma': 30,
+                'canny_low': 15, 'canny_high': 60, 'largest_n': 15,
+                'simplify_pct': 0.0, 'min_area': 200, 'gaussian_kernel': 3, 'edge_thickness': 1
+            },
+            "Animals": {
+                'bilateral_d': 9, 'bilateral_c': 70, 'bilateral_sigma': 70,
+                'canny_low': 35, 'canny_high': 110, 'largest_n': 10,
+                'simplify_pct': 0.2, 'min_area': 400, 'gaussian_kernel': 5, 'edge_thickness': 2
+            },
+            "High Detail": {
+                'bilateral_d': 1, 'bilateral_c': 20, 'bilateral_sigma': 20,
+                'canny_low': 10, 'canny_high': 50, 'largest_n': 25,
+                'simplify_pct': 0.0, 'min_area': 0, 'gaussian_kernel': 3, 'edge_thickness': 1
+            },
+            "Ultra Detail": {
+                'bilateral_d': 1, 'bilateral_c': 15, 'bilateral_sigma': 15,
+                'canny_low': 5, 'canny_high': 30, 'largest_n': 30,
+                'simplify_pct': 0.0, 'min_area': 0, 'gaussian_kernel': 1, 'edge_thickness': 1
+            },
+            "Selfies": {
+                'bilateral_d': 7, 'bilateral_c': 65, 'bilateral_sigma': 65,
+                'canny_low': 25, 'canny_high': 85, 'largest_n': 6,
+                'simplify_pct': 0.1, 'min_area': 600, 'gaussian_kernel': 5, 'edge_thickness': 2
+            },
+            "Architecture": {
+                'bilateral_d': 7, 'bilateral_c': 60, 'bilateral_sigma': 60,
+                'canny_low': 40, 'canny_high': 120, 'largest_n': 8,
+                'simplify_pct': 0.3, 'min_area': 500, 'gaussian_kernel': 3, 'edge_thickness': 2
+            },
+            "Nature": {
+                'bilateral_d': 11, 'bilateral_c': 80, 'bilateral_sigma': 80,
+                'canny_low': 25, 'canny_high': 90, 'largest_n': 12,
+                'simplify_pct': 0.25, 'min_area': 300, 'gaussian_kernel': 5, 'edge_thickness': 3
+            }
+        }
+        
+        if preset_name in presets:
+            preset = presets[preset_name]
+            
+            # Update sliders
+            self.bilateral_d_slider.findChild(QSlider).setValue(preset['bilateral_d'])
+            self.bilateral_c_slider.findChild(QSlider).setValue(preset['bilateral_c'])
+            self.bilateral_sigma_slider.findChild(QSlider).setValue(preset['bilateral_sigma'])
+            self.canny_low_slider.findChild(QSlider).setValue(preset['canny_low'])
+            self.canny_high_slider.findChild(QSlider).setValue(preset['canny_high'])
+            self.largest_n_slider.findChild(QSlider).setValue(preset['largest_n'])
+            self.simplify_slider.findChild(QSlider).setValue(int(preset['simplify_pct'] * 100))
+            self.min_area_slider.findChild(QSlider).setValue(preset['min_area'])
+            self.gaussian_kernel_slider.findChild(QSlider).setValue(preset['gaussian_kernel'])
+            self.edge_thickness_slider.findChild(QSlider).setValue(preset['edge_thickness'])
+            
+            # Update parameters
+            self.params.update(preset)
+            
+            print(f"✅ Applied preset: {preset_name}")
+    
     def setup_timer(self):
         """Setup processing timer"""
         self.processing_timer = QTimer()
@@ -734,11 +915,14 @@ class FixedImageEmbossWindow(QMainWindow):
         # Update parameters
         self.params['bilateral_d'] = self.bilateral_d_slider.findChild(QSlider).value()
         self.params['bilateral_c'] = self.bilateral_c_slider.findChild(QSlider).value()
+        self.params['bilateral_sigma'] = self.bilateral_sigma_slider.findChild(QSlider).value()
         self.params['canny_low'] = self.canny_low_slider.findChild(QSlider).value()
         self.params['canny_high'] = self.canny_high_slider.findChild(QSlider).value()
         self.params['largest_n'] = self.largest_n_slider.findChild(QSlider).value()
         self.params['simplify_pct'] = self.simplify_slider.findChild(QSlider).value() / 100.0
         self.params['min_area'] = self.min_area_slider.findChild(QSlider).value()
+        self.params['gaussian_kernel'] = self.gaussian_kernel_slider.findChild(QSlider).value()
+        self.params['edge_thickness'] = self.edge_thickness_slider.findChild(QSlider).value()
         self.params['mm_per_px'] = self.mm_per_px_spin.value() / 1000.0
         self.params['use_splines'] = self.use_splines_checkbox.isChecked()
         self.params['invert'] = self.invert_checkbox.isChecked()
@@ -845,8 +1029,11 @@ class FixedImageEmbossWindow(QMainWindow):
                 self.params['bilateral_sigma']
             )
             
-            # Apply Gaussian blur
-            blurred = cv2.GaussianBlur(filtered, (5, 5), 0)
+            # Apply Gaussian blur with configurable kernel size
+            gaussian_kernel = self.params.get('gaussian_kernel', 5)
+            if gaussian_kernel % 2 == 0:
+                gaussian_kernel += 1  # Ensure odd number
+            blurred = cv2.GaussianBlur(filtered, (gaussian_kernel, gaussian_kernel), 0)
             
             # Apply Canny edge detection
             edges = cv2.Canny(
@@ -855,8 +1042,9 @@ class FixedImageEmbossWindow(QMainWindow):
                 self.params['canny_high']
             )
             
-            # Thicken edges
-            kernel = np.ones((3, 3), np.uint8)
+            # Thicken edges with configurable thickness
+            edge_thickness = self.params.get('edge_thickness', 3)
+            kernel = np.ones((edge_thickness, edge_thickness), np.uint8)
             thickened = cv2.dilate(edges, kernel, iterations=1)
             
             # Apply invert if needed
@@ -875,15 +1063,13 @@ class FixedImageEmbossWindow(QMainWindow):
                 if len(contours) > 1:
                     contours = contours[1:]  # Skip the first (largest) contour
                 
-                # Filter by minimum area
-                filtered_contours = []
-                for contour in contours:
-                    area = cv2.contourArea(contour)
-                    if area >= self.params['min_area']:
-                        filtered_contours.append(contour)
+                # Filter by minimum area (0 means no limit)
+                min_area = self.params.get('min_area', 1000)
+                if min_area > 0:
+                    contours = [c for c in contours if cv2.contourArea(c) >= min_area]
                 
                 # Keep the largest N internal contours
-                self.current_contours = filtered_contours[:self.params['largest_n']]
+                self.current_contours = contours[:self.params['largest_n']]
             else:
                 self.current_contours = []
             

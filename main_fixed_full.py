@@ -40,6 +40,10 @@ class SafeGraphicsView(QGraphicsView):
         
         # Mouse tracking
         self.setMouseTracking(True)
+        
+        # Enable scroll bars for zoom
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
     
     def set_image(self, image):
         """Set image to display safely"""
@@ -67,7 +71,8 @@ class SafeGraphicsView(QGraphicsView):
         except Exception as e:
             print(f"Error setting image: {e}")
     
-    def set_dxf_preview(self, contours, splines=None, use_splines=True, image_size=None):
+    def set_dxf_preview(self, contours, splines=None, use_splines=True, image_size=None, 
+                       show_original=False, show_contours=True, show_splines=True):
         """Set DXF preview safely - with actual visual preview"""
         try:
             if not contours:
@@ -87,16 +92,45 @@ class SafeGraphicsView(QGraphicsView):
             # Create black background
             preview = np.zeros((height, width, 3), dtype=np.uint8)
             
-            # Draw contours in white
-            for i, contour in enumerate(contours):
-                # Convert contour to the right format
-                if len(contour.shape) == 3:
-                    contour_points = contour.reshape(-1, 2)
-                else:
-                    contour_points = contour
-                
-                # Draw contour
-                cv2.drawContours(preview, [contour_points.astype(np.int32)], -1, (255, 255, 255), 2)
+            # Draw original image if requested
+            if show_original and hasattr(self, 'original_image') and self.original_image is not None:
+                # Resize original image to match preview size
+                orig_resized = cv2.resize(self.original_image, (width, height))
+                # Blend with black background (50% opacity)
+                preview = cv2.addWeighted(preview, 0.5, orig_resized, 0.5, 0)
+            
+            # Draw contours if requested
+            if show_contours:
+                for i, contour in enumerate(contours):
+                    # Convert contour to the right format
+                    if len(contour.shape) == 3:
+                        contour_points = contour.reshape(-1, 2)
+                    else:
+                        contour_points = contour
+                    
+                    # Draw contour in white
+                    cv2.drawContours(preview, [contour_points.astype(np.int32)], -1, (255, 255, 255), 2)
+            
+            # Draw splines if requested and available
+            if show_splines and splines:
+                for i, spline in enumerate(splines):
+                    if len(spline.shape) == 2:
+                        # Convert to contour format for drawing
+                        spline_contour = spline.reshape(-1, 1, 2).astype(np.int32)
+                    else:
+                        spline_contour = spline.astype(np.int32)
+                    
+                    # Draw spline as connected lines in green
+                    for j in range(len(spline_contour) - 1):
+                        pt1 = tuple(spline_contour[j][0])
+                        pt2 = tuple(spline_contour[j + 1][0])
+                        cv2.line(preview, pt1, pt2, (0, 255, 0), 2)  # Green for splines
+                    
+                    # Close the spline
+                    if len(spline_contour) > 2:
+                        pt1 = tuple(spline_contour[-1][0])
+                        pt2 = tuple(spline_contour[0][0])
+                        cv2.line(preview, pt1, pt2, (0, 255, 0), 2)
             
             # Convert to QPixmap and display
             rgb_preview = cv2.cvtColor(preview, cv2.COLOR_BGR2RGB)
@@ -141,6 +175,34 @@ class SafeGraphicsView(QGraphicsView):
         """Reset zoom to fit"""
         self.fit_in_view()
         self.zoom_factor = 1.0
+    
+    def wheelEvent(self, event):
+        """Handle mouse wheel zoom"""
+        # Get the wheel delta
+        delta = event.angleDelta().y()
+        
+        # Calculate zoom factor
+        zoom_in_factor = 1.15
+        zoom_out_factor = 1.0 / zoom_in_factor
+        
+        # Determine zoom direction
+        if delta > 0:
+            # Zoom in
+            new_zoom = self.zoom_factor * zoom_in_factor
+        else:
+            # Zoom out
+            new_zoom = self.zoom_factor * zoom_out_factor
+        
+        # Clamp zoom to limits
+        new_zoom = max(self.min_zoom, min(self.max_zoom, new_zoom))
+        
+        # Apply zoom
+        if new_zoom != self.zoom_factor:
+            self.zoom_factor = new_zoom
+            self.scale(zoom_in_factor if delta > 0 else zoom_out_factor, 
+                      zoom_in_factor if delta > 0 else zoom_out_factor)
+        
+        event.accept()
 
 
 class FixedImageEmbossWindow(QMainWindow):
@@ -204,6 +266,11 @@ class FixedImageEmbossWindow(QMainWindow):
         splitter.setSizes([600, 1000])
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 2)
+        
+        # Connect checkbox signals for preview updates
+        self.show_original_checkbox.toggled.connect(self.display_dxf_preview)
+        self.show_contours_checkbox.toggled.connect(self.display_dxf_preview)
+        self.show_splines_checkbox.toggled.connect(self.display_dxf_preview)
     
     def create_left_panel(self):
         """Create left panel with parameters and original image"""
@@ -247,6 +314,7 @@ class FixedImageEmbossWindow(QMainWindow):
         self.process_btn.clicked.connect(self.process_image)
         self.process_btn.setEnabled(False)
         file_layout.addWidget(self.process_btn)
+        
         
         self.file_label = QLabel("No image loaded")
         self.file_label.setStyleSheet("color: #666; font-style: italic;")
@@ -686,13 +754,22 @@ class FixedImageEmbossWindow(QMainWindow):
             if not self.current_contours:
                 return
             
-            # Update preview info
-            self.preview_info_label.setText(f"Zoom: 100% | Contours: {len(self.current_contours)} | Splines: {len(self.current_splines)}")
+            # Update preview info with zoom
+            zoom_percent = int(self.dxf_view.zoom_factor * 100)
+            self.preview_info_label.setText(f"Zoom: {zoom_percent}% | Contours: {len(self.current_contours)} | Splines: {len(self.current_splines)}")
             
-            # Safe DXF preview (no complex graphics that can crash)
+            # Safe DXF preview with checkbox states
             if self.original_image is not None:
                 image_size = self.original_image.shape[:2]
-                self.dxf_view.set_dxf_preview(self.current_contours, self.current_splines, self.params['use_splines'], image_size)
+                self.dxf_view.set_dxf_preview(
+                    self.current_contours, 
+                    self.current_splines, 
+                    self.params['use_splines'], 
+                    image_size,
+                    show_original=self.show_original_checkbox.isChecked(),
+                    show_contours=self.show_contours_checkbox.isChecked(),
+                    show_splines=self.show_splines_checkbox.isChecked()
+                )
             
         except Exception as e:
             print(f"Error displaying DXF preview: {e}")

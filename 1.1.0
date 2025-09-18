@@ -1,5 +1,0 @@
-Requirement already satisfied: ezdxf in c:\users\bruto\appdata\local\programs\python\python311\lib\site-packages (1.4.2)
-Requirement already satisfied: pyparsing>=2.0.1 in c:\users\bruto\appdata\local\programs\python\python311\lib\site-packages (from ezdxf) (3.2.4)
-Requirement already satisfied: typing_extensions>=4.6.0 in c:\users\bruto\appdata\local\programs\python\python311\lib\site-packages (from ezdxf) (4.15.0)
-Requirement already satisfied: numpy in c:\users\bruto\appdata\local\programs\python\python311\lib\site-packages (from ezdxf) (2.2.6)
-Requirement already satisfied: fonttools in c:\users\bruto\appdata\local\programs\python\python311\lib\site-packages (from ezdxf) (4.59.2)

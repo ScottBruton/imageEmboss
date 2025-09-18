@@ -1,6 +1,0 @@
-Collecting PyOpenGL-accelerate
-  Downloading pyopengl_accelerate-3.1.10-cp311-cp311-win_amd64.whl.metadata (4.0 kB)
-Downloading pyopengl_accelerate-3.1.10-cp311-cp311-win_amd64.whl (390 kB)
-   -------------------------------------- 390.9/390.9 kB 739.2 kB/s eta 0:00:00
-Installing collected packages: PyOpenGL-accelerate
-Successfully installed PyOpenGL-accelerate-3.1.10

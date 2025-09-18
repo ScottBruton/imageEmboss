@@ -865,33 +865,667 @@ class FixedImageEmbossWindow(QMainWindow):
             return self._simple_smooth(points)
     
     def _create_segment_following_spline(self, points):
-        """Create spline that just smooths pixel jaggedness without changing geometry"""
+        """Create spline with feedback loop to ensure 95% accuracy"""
         try:
             import numpy as np
             
             if len(points) < 3:
                 return points.tolist()
             
-            # Simple approach: just smooth the pixel jaggedness with a small moving average
-            # This preserves the exact geometry but removes pixel noise
-            smoothed_points = []
+            # Start with simple moving average
+            best_spline = self._simple_moving_average(points)
+            best_accuracy = self._calculate_accuracy(points, best_spline)
             
-            for i in range(len(points)):
-                if i == 0 or i == len(points) - 1:
-                    # Keep first and last points unchanged
-                    smoothed_points.append(points[i].tolist())
-                else:
-                    # Simple 3-point moving average to smooth pixel jaggedness
-                    x = (points[i-1][0] + points[i][0] + points[i+1][0]) / 3.0
-                    y = (points[i-1][1] + points[i][1] + points[i+1][1]) / 3.0
-                    smoothed_points.append([x, y])
+            print(f"    📊 Initial accuracy: {best_accuracy:.1f}%")
             
-            return smoothed_points
+            # If already above 95%, we're done
+            if best_accuracy >= 95.0:
+                print(f"    ✅ Accuracy {best_accuracy:.1f}% >= 95% - accepted")
+                return best_spline
+            
+            # Try up to 50 iterations to improve accuracy
+            for iteration in range(50):
+                # Try different smoothing approaches
+                candidate_spline = self._adaptive_smoothing(points, iteration)
+                accuracy = self._calculate_accuracy(points, candidate_spline)
+                
+                # Only log every 5th iteration to reduce spam
+                if iteration % 5 == 0 or accuracy > best_accuracy:
+                    print(f"    🔄 Iteration {iteration+1}: accuracy {accuracy:.1f}%")
+                
+                # If this is better, keep it
+                if accuracy > best_accuracy:
+                    best_accuracy = accuracy
+                    best_spline = candidate_spline
+                    print(f"    📈 New best accuracy: {best_accuracy:.1f}%")
+                
+                # If we hit 95%, we're done
+                if best_accuracy >= 95.0:
+                    print(f"    ✅ Target accuracy reached: {best_accuracy:.1f}%")
+                    break
+            
+            print(f"    🎯 Final accuracy: {best_accuracy:.1f}%")
+            return best_spline
             
         except Exception as e:
-            print(f"⚠️ Simple smoothing failed: {e}")
-            # Fallback to original points
-            return points.tolist()
+            print(f"⚠️ Feedback loop failed: {e}")
+            # Fallback to simple smoothing
+            return self._simple_moving_average(points)
+    
+    def _simple_moving_average(self, points):
+        """Simple 3-point moving average smoothing"""
+        import numpy as np
+        
+        smoothed_points = []
+        for i in range(len(points)):
+            if i == 0 or i == len(points) - 1:
+                # Keep first and last points unchanged
+                smoothed_points.append(points[i].tolist())
+            else:
+                # Simple 3-point moving average
+                x = (points[i-1][0] + points[i][0] + points[i+1][0]) / 3.0
+                y = (points[i-1][1] + points[i][1] + points[i+1][1]) / 3.0
+                smoothed_points.append([x, y])
+        
+        return smoothed_points
+    
+    def _adaptive_smoothing(self, points, iteration):
+        """Try different smoothing approaches based on iteration"""
+        import numpy as np
+        
+        # First 10 iterations: basic approaches
+        if iteration == 0:
+            return self._n_point_moving_average(points, 5)
+        elif iteration == 1:
+            return self._weighted_moving_average(points)
+        elif iteration == 2:
+            return self._n_point_moving_average(points, 7)
+        elif iteration == 3:
+            return self._gaussian_like_smoothing(points)
+        elif iteration == 4:
+            return self._edge_preserving_smoothing(points)
+        elif iteration == 5:
+            return self._n_point_moving_average(points, 9)
+        elif iteration == 6:
+            return self._n_point_moving_average(points, 11)
+        elif iteration == 7:
+            return self._n_point_moving_average(points, 13)
+        elif iteration == 8:
+            return self._n_point_moving_average(points, 15)
+        elif iteration == 9:
+            return self._n_point_moving_average(points, 17)
+        
+        # Iterations 10-19: advanced weighted approaches
+        elif iteration < 20:
+            weight_patterns = [
+                [1, 1, 2, 1, 1],  # Center emphasis
+                [1, 2, 3, 2, 1],  # Strong center
+                [0.5, 1, 2, 1, 0.5],  # Gentle center
+                [2, 1, 1, 1, 2],  # Edge emphasis
+                [1, 3, 5, 3, 1],  # Very strong center
+                [0.1, 0.3, 1, 0.3, 0.1],  # Sharp center
+                [1, 1, 1, 1, 1],  # Equal weights
+                [3, 2, 1, 2, 3],  # Edge bias
+                [1, 2, 4, 2, 1],  # Moderate center
+                [0.2, 0.8, 2, 0.8, 0.2]  # Soft center
+            ]
+            pattern = weight_patterns[iteration - 10]
+            return self._custom_weighted_average(points, pattern)
+        
+        # Iterations 20-29: Gaussian variations
+        elif iteration < 30:
+            sigma_values = [0.5, 0.7, 1.0, 1.2, 1.5, 1.8, 2.0, 2.2, 2.5, 3.0]
+            sigma = sigma_values[iteration - 20]
+            return self._gaussian_smoothing_variable(points, sigma)
+        
+        # Iterations 30-39: Edge-preserving variations
+        elif iteration < 40:
+            angle_thresholds = [90, 100, 110, 120, 130, 140, 150, 160, 170, 180]
+            threshold = angle_thresholds[iteration - 30]
+            return self._edge_preserving_variable(points, threshold)
+        
+        # Iterations 40-49: Hybrid approaches
+        else:
+            hybrid_type = iteration - 40
+            if hybrid_type == 0:
+                return self._hybrid_smoothing_1(points)
+            elif hybrid_type == 1:
+                return self._hybrid_smoothing_2(points)
+            elif hybrid_type == 2:
+                return self._hybrid_smoothing_3(points)
+            elif hybrid_type == 3:
+                return self._hybrid_smoothing_4(points)
+            elif hybrid_type == 4:
+                return self._hybrid_smoothing_5(points)
+            elif hybrid_type == 6:
+                return self._hybrid_smoothing_6(points)
+            elif hybrid_type == 7:
+                return self._hybrid_smoothing_7(points)
+            elif hybrid_type == 8:
+                return self._hybrid_smoothing_8(points)
+            else:
+                return self._hybrid_smoothing_9(points)
+    
+    def _n_point_moving_average(self, points, window_size):
+        """N-point moving average smoothing"""
+        import numpy as np
+        
+        smoothed_points = []
+        half_window = window_size // 2
+        
+        for i in range(len(points)):
+            if i < half_window or i >= len(points) - half_window:
+                # Keep edge points unchanged
+                smoothed_points.append(points[i].tolist())
+            else:
+                # Average over window
+                window_points = points[i-half_window:i+half_window+1]
+                x = np.mean([p[0] for p in window_points])
+                y = np.mean([p[1] for p in window_points])
+                smoothed_points.append([x, y])
+        
+        return smoothed_points
+    
+    def _weighted_moving_average(self, points):
+        """Weighted moving average (center point has more weight)"""
+        import numpy as np
+        
+        smoothed_points = []
+        weights = [1, 2, 3, 2, 1]  # Center point has weight 3
+        
+        for i in range(len(points)):
+            if i < 2 or i >= len(points) - 2:
+                # Keep edge points unchanged
+                smoothed_points.append(points[i].tolist())
+            else:
+                # Weighted average
+                window_points = points[i-2:i+3]
+                total_weight = sum(weights)
+                x = sum(p[0] * w for p, w in zip(window_points, weights)) / total_weight
+                y = sum(p[1] * w for p, w in zip(window_points, weights)) / total_weight
+                smoothed_points.append([x, y])
+        
+        return smoothed_points
+    
+    def _gaussian_like_smoothing(self, points):
+        """Gaussian-like smoothing with small kernel"""
+        import numpy as np
+        
+        smoothed_points = []
+        weights = [0.1, 0.2, 0.4, 0.2, 0.1]  # Gaussian-like weights
+        
+        for i in range(len(points)):
+            if i < 2 or i >= len(points) - 2:
+                # Keep edge points unchanged
+                smoothed_points.append(points[i].tolist())
+            else:
+                # Gaussian-like weighted average
+                window_points = points[i-2:i+3]
+                x = sum(p[0] * w for p, w in zip(window_points, weights))
+                y = sum(p[1] * w for p, w in zip(window_points, weights))
+                smoothed_points.append([x, y])
+        
+        return smoothed_points
+    
+    def _edge_preserving_smoothing(self, points):
+        """Edge-preserving smoothing that maintains sharp corners"""
+        import numpy as np
+        
+        smoothed_points = []
+        
+        for i in range(len(points)):
+            if i == 0 or i == len(points) - 1:
+                # Keep first and last points unchanged
+                smoothed_points.append(points[i].tolist())
+            else:
+                # Check if this is a corner (large angle change)
+                p1, p2, p3 = points[i-1], points[i], points[i+1]
+                
+                # Calculate angle change
+                v1 = np.array([p2[0] - p1[0], p2[1] - p1[1]])
+                v2 = np.array([p3[0] - p2[0], p3[1] - p2[1]])
+                
+                # Normalize vectors
+                norm1 = np.linalg.norm(v1)
+                norm2 = np.linalg.norm(v2)
+                
+                if norm1 > 0 and norm2 > 0:
+                    cos_angle = np.dot(v1, v2) / (norm1 * norm2)
+                    cos_angle = np.clip(cos_angle, -1, 1)
+                    angle = np.arccos(cos_angle)
+                    
+                    # If sharp corner (angle < 120 degrees), don't smooth much
+                    if angle < np.pi * 2/3:  # 120 degrees
+                        # Light smoothing for corners
+                        x = (p1[0] + 2*p2[0] + p3[0]) / 4.0
+                        y = (p1[1] + 2*p2[1] + p3[1]) / 4.0
+                    else:
+                        # Normal smoothing for smooth areas
+                        x = (p1[0] + p2[0] + p3[0]) / 3.0
+                        y = (p1[1] + p2[1] + p3[1]) / 3.0
+                else:
+                    # Fallback to simple average
+                    x = (p1[0] + p2[0] + p3[0]) / 3.0
+                    y = (p1[1] + p2[1] + p3[1]) / 3.0
+                
+                smoothed_points.append([x, y])
+        
+        return smoothed_points
+    
+    def _custom_weighted_average(self, points, weights):
+        """Custom weighted moving average with specified weights"""
+        import numpy as np
+        
+        smoothed_points = []
+        half_window = len(weights) // 2
+        
+        for i in range(len(points)):
+            if i < half_window or i >= len(points) - half_window:
+                # Keep edge points unchanged
+                smoothed_points.append(points[i].tolist())
+            else:
+                # Weighted average
+                window_points = points[i-half_window:i+half_window+1]
+                total_weight = sum(weights)
+                x = sum(p[0] * w for p, w in zip(window_points, weights)) / total_weight
+                y = sum(p[1] * w for p, w in zip(window_points, weights)) / total_weight
+                smoothed_points.append([x, y])
+        
+        return smoothed_points
+    
+    def _gaussian_smoothing_variable(self, points, sigma):
+        """Gaussian smoothing with variable sigma"""
+        import numpy as np
+        
+        smoothed_points = []
+        window_size = min(11, len(points) // 2)  # Adaptive window size
+        half_window = window_size // 2
+        
+        # Create Gaussian weights
+        weights = []
+        for i in range(window_size):
+            x = i - half_window
+            weight = np.exp(-(x**2) / (2 * sigma**2))
+            weights.append(weight)
+        
+        # Normalize weights
+        total_weight = sum(weights)
+        weights = [w / total_weight for w in weights]
+        
+        for i in range(len(points)):
+            if i < half_window or i >= len(points) - half_window:
+                # Keep edge points unchanged
+                smoothed_points.append(points[i].tolist())
+            else:
+                # Gaussian weighted average
+                window_points = points[i-half_window:i+half_window+1]
+                x = sum(p[0] * w for p, w in zip(window_points, weights))
+                y = sum(p[1] * w for p, w in zip(window_points, weights))
+                smoothed_points.append([x, y])
+        
+        return smoothed_points
+    
+    def _edge_preserving_variable(self, points, angle_threshold_deg):
+        """Edge-preserving smoothing with variable angle threshold"""
+        import numpy as np
+        
+        smoothed_points = []
+        angle_threshold = np.radians(angle_threshold_deg)
+        
+        for i in range(len(points)):
+            if i == 0 or i == len(points) - 1:
+                # Keep first and last points unchanged
+                smoothed_points.append(points[i].tolist())
+            else:
+                # Check if this is a corner
+                p1, p2, p3 = points[i-1], points[i], points[i+1]
+                
+                # Calculate angle change
+                v1 = np.array([p2[0] - p1[0], p2[1] - p1[1]])
+                v2 = np.array([p3[0] - p2[0], p3[1] - p2[1]])
+                
+                # Normalize vectors
+                norm1 = np.linalg.norm(v1)
+                norm2 = np.linalg.norm(v2)
+                
+                if norm1 > 0 and norm2 > 0:
+                    cos_angle = np.dot(v1, v2) / (norm1 * norm2)
+                    cos_angle = np.clip(cos_angle, -1, 1)
+                    angle = np.arccos(cos_angle)
+                    
+                    # If sharp corner, don't smooth much
+                    if angle < angle_threshold:
+                        # Light smoothing for corners
+                        x = (p1[0] + 2*p2[0] + p3[0]) / 4.0
+                        y = (p1[1] + 2*p2[1] + p3[1]) / 4.0
+                    else:
+                        # Normal smoothing for smooth areas
+                        x = (p1[0] + p2[0] + p3[0]) / 3.0
+                        y = (p1[1] + p2[1] + p3[1]) / 3.0
+                else:
+                    # Fallback to simple average
+                    x = (p1[0] + p2[0] + p3[0]) / 3.0
+                    y = (p1[1] + p2[1] + p3[1]) / 3.0
+                
+                smoothed_points.append([x, y])
+        
+        return smoothed_points
+    
+    def _hybrid_smoothing_1(self, points):
+        """Hybrid: Combine edge-preserving with Gaussian"""
+        edge_preserved = self._edge_preserving_smoothing(points)
+        gaussian = self._gaussian_like_smoothing(points)
+        
+        # Blend the two results
+        blended = []
+        for i in range(len(points)):
+            x = (edge_preserved[i][0] + gaussian[i][0]) / 2.0
+            y = (edge_preserved[i][1] + gaussian[i][1]) / 2.0
+            blended.append([x, y])
+        
+        return blended
+    
+    def _hybrid_smoothing_2(self, points):
+        """Hybrid: Adaptive window based on local curvature"""
+        import numpy as np
+        
+        smoothed_points = []
+        
+        for i in range(len(points)):
+            if i < 2 or i >= len(points) - 2:
+                # Keep edge points unchanged
+                smoothed_points.append(points[i].tolist())
+            else:
+                # Calculate local curvature
+                p1, p2, p3 = points[i-1], points[i], points[i+1]
+                v1 = np.array([p2[0] - p1[0], p2[1] - p1[1]])
+                v2 = np.array([p3[0] - p2[0], p3[1] - p2[1]])
+                
+                norm1 = np.linalg.norm(v1)
+                norm2 = np.linalg.norm(v2)
+                
+                if norm1 > 0 and norm2 > 0:
+                    cos_angle = np.dot(v1, v2) / (norm1 * norm2)
+                    cos_angle = np.clip(cos_angle, -1, 1)
+                    angle = np.arccos(cos_angle)
+                    
+                    # Use larger window for smooth areas, smaller for corners
+                    if angle > np.pi * 2/3:  # Smooth area
+                        window_size = 5
+                    else:  # Corner
+                        window_size = 3
+                else:
+                    window_size = 3
+                
+                # Apply adaptive smoothing
+                half_window = window_size // 2
+                start = max(0, i - half_window)
+                end = min(len(points), i + half_window + 1)
+                window_points = points[start:end]
+                
+                x = np.mean([p[0] for p in window_points])
+                y = np.mean([p[1] for p in window_points])
+                smoothed_points.append([x, y])
+        
+        return smoothed_points
+    
+    def _hybrid_smoothing_3(self, points):
+        """Hybrid: Multi-scale smoothing"""
+        # Apply different levels of smoothing and blend
+        level1 = self._simple_moving_average(points)
+        level2 = self._n_point_moving_average(points, 5)
+        level3 = self._n_point_moving_average(points, 7)
+        
+        blended = []
+        for i in range(len(points)):
+            x = (level1[i][0] * 0.5 + level2[i][0] * 0.3 + level3[i][0] * 0.2)
+            y = (level1[i][1] * 0.5 + level2[i][1] * 0.3 + level3[i][1] * 0.2)
+            blended.append([x, y])
+        
+        return blended
+    
+    def _hybrid_smoothing_4(self, points):
+        """Hybrid: Distance-weighted smoothing"""
+        import numpy as np
+        
+        smoothed_points = []
+        
+        for i in range(len(points)):
+            if i < 2 or i >= len(points) - 2:
+                # Keep edge points unchanged
+                smoothed_points.append(points[i].tolist())
+            else:
+                # Weight by distance from center point
+                center = points[i]
+                weights = []
+                window_points = points[i-2:i+3]
+                
+                for p in window_points:
+                    dist = np.sqrt((p[0] - center[0])**2 + (p[1] - center[1])**2)
+                    weight = 1.0 / (1.0 + dist)  # Closer points get higher weight
+                    weights.append(weight)
+                
+                total_weight = sum(weights)
+                x = sum(p[0] * w for p, w in zip(window_points, weights)) / total_weight
+                y = sum(p[1] * w for p, w in zip(window_points, weights)) / total_weight
+                smoothed_points.append([x, y])
+        
+        return smoothed_points
+    
+    def _hybrid_smoothing_5(self, points):
+        """Hybrid: Curvature-adaptive smoothing"""
+        import numpy as np
+        
+        smoothed_points = []
+        
+        for i in range(len(points)):
+            if i < 2 or i >= len(points) - 2:
+                # Keep edge points unchanged
+                smoothed_points.append(points[i].tolist())
+            else:
+                # Calculate curvature
+                p1, p2, p3 = points[i-1], points[i], points[i+1]
+                v1 = np.array([p2[0] - p1[0], p2[1] - p1[1]])
+                v2 = np.array([p3[0] - p2[0], p3[1] - p2[1]])
+                
+                norm1 = np.linalg.norm(v1)
+                norm2 = np.linalg.norm(v2)
+                
+                if norm1 > 0 and norm2 > 0:
+                    cos_angle = np.dot(v1, v2) / (norm1 * norm2)
+                    cos_angle = np.clip(cos_angle, -1, 1)
+                    angle = np.arccos(cos_angle)
+                    
+                    # Adjust smoothing strength based on curvature
+                    curvature = np.pi - angle  # Higher curvature = more smoothing
+                    smoothing_factor = min(1.0, curvature / (np.pi / 4))  # Normalize
+                    
+                    # Blend between original and smoothed
+                    smoothed_x = (p1[0] + p2[0] + p3[0]) / 3.0
+                    smoothed_y = (p1[1] + p2[1] + p3[1]) / 3.0
+                    
+                    x = p2[0] * (1 - smoothing_factor) + smoothed_x * smoothing_factor
+                    y = p2[1] * (1 - smoothing_factor) + smoothed_y * smoothing_factor
+                else:
+                    x = (p1[0] + p2[0] + p3[0]) / 3.0
+                    y = (p1[1] + p2[1] + p3[1]) / 3.0
+                
+                smoothed_points.append([x, y])
+        
+        return smoothed_points
+    
+    def _hybrid_smoothing_6(self, points):
+        """Hybrid: Median + Mean combination"""
+        import numpy as np
+        
+        smoothed_points = []
+        
+        for i in range(len(points)):
+            if i < 2 or i >= len(points) - 2:
+                # Keep edge points unchanged
+                smoothed_points.append(points[i].tolist())
+            else:
+                # Get window
+                window_points = points[i-2:i+3]
+                
+                # Calculate median and mean
+                x_values = [p[0] for p in window_points]
+                y_values = [p[1] for p in window_points]
+                
+                median_x = np.median(x_values)
+                median_y = np.median(y_values)
+                mean_x = np.mean(x_values)
+                mean_y = np.mean(y_values)
+                
+                # Blend median and mean
+                x = (median_x + mean_x) / 2.0
+                y = (median_y + mean_y) / 2.0
+                smoothed_points.append([x, y])
+        
+        return smoothed_points
+    
+    def _hybrid_smoothing_7(self, points):
+        """Hybrid: Bilateral-like smoothing"""
+        import numpy as np
+        
+        smoothed_points = []
+        
+        for i in range(len(points)):
+            if i < 2 or i >= len(points) - 2:
+                # Keep edge points unchanged
+                smoothed_points.append(points[i].tolist())
+            else:
+                center = points[i]
+                window_points = points[i-2:i+3]
+                
+                # Bilateral weights: spatial + intensity
+                weights = []
+                for p in window_points:
+                    # Spatial weight (distance)
+                    spatial_dist = np.sqrt((p[0] - center[0])**2 + (p[1] - center[1])**2)
+                    spatial_weight = np.exp(-spatial_dist**2 / (2 * 1.0**2))  # sigma = 1.0
+                    
+                    # Intensity weight (assuming grayscale-like intensity)
+                    intensity_dist = abs((p[0] + p[1]) - (center[0] + center[1]))
+                    intensity_weight = np.exp(-intensity_dist**2 / (2 * 10.0**2))  # sigma = 10.0
+                    
+                    weight = spatial_weight * intensity_weight
+                    weights.append(weight)
+                
+                total_weight = sum(weights)
+                x = sum(p[0] * w for p, w in zip(window_points, weights)) / total_weight
+                y = sum(p[1] * w for p, w in zip(window_points, weights)) / total_weight
+                smoothed_points.append([x, y])
+        
+        return smoothed_points
+    
+    def _hybrid_smoothing_8(self, points):
+        """Hybrid: Anisotropic smoothing"""
+        import numpy as np
+        
+        smoothed_points = []
+        
+        for i in range(len(points)):
+            if i < 2 or i >= len(points) - 2:
+                # Keep edge points unchanged
+                smoothed_points.append(points[i].tolist())
+            else:
+                # Calculate local gradient direction
+                p1, p2, p3 = points[i-1], points[i], points[i+1]
+                grad_x = (p3[0] - p1[0]) / 2.0
+                grad_y = (p3[1] - p1[1]) / 2.0
+                grad_mag = np.sqrt(grad_x**2 + grad_y**2)
+                
+                if grad_mag > 0:
+                    # Normalize gradient
+                    grad_x /= grad_mag
+                    grad_y /= grad_mag
+                    
+                    # Smooth more along gradient, less across
+                    # This is a simplified version
+                    x = (p1[0] + p2[0] + p3[0]) / 3.0
+                    y = (p1[1] + p2[1] + p3[1]) / 3.0
+                else:
+                    x = (p1[0] + p2[0] + p3[0]) / 3.0
+                    y = (p1[1] + p2[1] + p3[1]) / 3.0
+                
+                smoothed_points.append([x, y])
+        
+        return smoothed_points
+    
+    def _hybrid_smoothing_9(self, points):
+        """Hybrid: Non-local means inspired"""
+        import numpy as np
+        
+        smoothed_points = []
+        
+        for i in range(len(points)):
+            if i < 2 or i >= len(points) - 2:
+                # Keep edge points unchanged
+                smoothed_points.append(points[i].tolist())
+            else:
+                # Find similar patches in the neighborhood
+                center = points[i]
+                window_points = points[i-2:i+3]
+                
+                # Calculate similarity weights
+                weights = []
+                for p in window_points:
+                    # Simple similarity based on distance
+                    dist = np.sqrt((p[0] - center[0])**2 + (p[1] - center[1])**2)
+                    similarity = np.exp(-dist**2 / (2 * 0.5**2))  # sigma = 0.5
+                    weights.append(similarity)
+                
+                total_weight = sum(weights)
+                x = sum(p[0] * w for p, w in zip(window_points, weights)) / total_weight
+                y = sum(p[1] * w for p, w in zip(window_points, weights)) / total_weight
+                smoothed_points.append([x, y])
+        
+        return smoothed_points
+    
+    def _calculate_accuracy(self, original_points, spline_points):
+        """Calculate how well the spline matches the original contour"""
+        try:
+            import numpy as np
+            
+            if len(original_points) != len(spline_points):
+                return 0.0
+            
+            # Calculate average distance between corresponding points
+            total_distance = 0.0
+            max_distance = 0.0
+            
+            for orig, spline in zip(original_points, spline_points):
+                distance = np.sqrt((orig[0] - spline[0])**2 + (orig[1] - spline[1])**2)
+                total_distance += distance
+                max_distance = max(max_distance, distance)
+            
+            avg_distance = total_distance / len(original_points)
+            
+            # Better accuracy calculation:
+            # - If average distance < 0.5 pixels = excellent (95-100%)
+            # - If average distance < 1.0 pixels = good (80-95%)
+            # - If average distance < 2.0 pixels = fair (60-80%)
+            # - If average distance > 2.0 pixels = poor (0-60%)
+            
+            if avg_distance < 0.5:
+                accuracy = 100 - (avg_distance * 10)  # 0.5 pixels = 95%
+            elif avg_distance < 1.0:
+                accuracy = 95 - ((avg_distance - 0.5) * 30)  # 1.0 pixels = 80%
+            elif avg_distance < 2.0:
+                accuracy = 80 - ((avg_distance - 1.0) * 20)  # 2.0 pixels = 60%
+            else:
+                accuracy = max(0, 60 - ((avg_distance - 2.0) * 30))  # >2.0 pixels = 0-60%
+            
+            # Also consider max distance - if any point is very far off, reduce accuracy
+            if max_distance > 3.0:
+                accuracy *= 0.8  # Penalty for outliers
+            
+            return min(100, max(0, accuracy))
+            
+        except Exception as e:
+            print(f"⚠️ Accuracy calculation failed: {e}")
+            return 0.0
     
     def _remove_duplicate_points(self, points):
         """Remove consecutive duplicate points"""
@@ -1128,6 +1762,8 @@ class FixedImageEmbossWindow(QMainWindow):
             
             # Export splines if available and enabled, otherwise export contours
             if self.params['use_splines'] and self.current_splines:
+                print(f"🎯 Exporting {len(self.current_splines)} smooth splines to DXF...")
+                
                 # Export smooth splines
                 for i, spline in enumerate(self.current_splines):
                     try:
@@ -1144,24 +1780,50 @@ class FixedImageEmbossWindow(QMainWindow):
                             points.append((dxf_x, dxf_y))
                         
                         if len(points) >= 3:
+                            # Create DXF spline entity that matches our smooth green splines
                             if len(points) >= 4:
-                                # Try to create B-spline
                                 try:
-                                    spline_entity = msp.add_spline(points)
-                                    spline_entity.closed = True
-                                except:
-                                    # Fallback to polyline
+                                    # Method 1: Create high-density polyline (most compatible)
+                                    # This ensures the DXF shows exactly the same smooth curves as the preview
                                     polyline = msp.add_lwpolyline(points)
                                     polyline.closed = True
+                                    print(f"  ✅ Spline {i+1}: High-density polyline ({len(points)} points)")
+                                    
+                                except Exception as polyline_error:
+                                    # Method 2: Fallback to sampled control points for true spline
+                                    try:
+                                        # Sample control points from the smooth spline
+                                        step = max(1, len(points) // 8)  # Max 8 control points
+                                        control_points = points[::step]
+                                        
+                                        # Ensure we have at least 4 control points
+                                        if len(control_points) < 4:
+                                            control_points = points[:4]
+                                        
+                                        # Create DXF spline with control points
+                                        spline_entity = msp.add_spline(control_points)
+                                        spline_entity.closed = True
+                                        
+                                        print(f"  ✅ Spline {i+1}: DXF spline with {len(control_points)} control points")
+                                        
+                                    except Exception as spline_error:
+                                        # Method 3: Final fallback - simple polyline
+                                        simple_points = points[::max(1, len(points)//20)]  # Sample points
+                                        polyline = msp.add_lwpolyline(simple_points)
+                                        polyline.closed = True
+                                        print(f"  ⚠️ Spline {i+1}: Fallback polyline ({len(simple_points)} points)")
                             else:
-                                # Use polyline for simple shapes
+                                # Simple shapes - use polyline
                                 polyline = msp.add_lwpolyline(points)
                                 polyline.closed = True
+                                print(f"  ✅ Spline {i+1}: Simple polyline ({len(points)} points)")
+                                
                     except Exception as e:
-                        print(f"Error exporting spline {i}: {e}")
+                        print(f"❌ Error exporting spline {i}: {e}")
                         continue
             else:
                 # Export raw contours
+                print(f"🎯 Exporting {len(self.current_contours)} raw contours to DXF...")
                 for contour in self.current_contours:
                     points = []
                     for point in contour:

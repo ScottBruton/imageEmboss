@@ -38,10 +38,14 @@ class SafeGraphicsView(QGraphicsView):
         self.min_zoom = 0.1
         self.max_zoom = 10.0
         
+        # Pan settings
+        self.panning = False
+        self.last_pan_point = None
+        
         # Mouse tracking
         self.setMouseTracking(True)
         
-        # Enable scroll bars for zoom
+        # Enable scroll bars for zoom and pan
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
     
@@ -99,8 +103,11 @@ class SafeGraphicsView(QGraphicsView):
                 # Blend with black background (50% opacity)
                 preview = cv2.addWeighted(preview, 0.5, orig_resized, 0.5, 0)
             
-            # Draw contours if requested
-            if show_contours:
+            # Create a single fill layer for all fills
+            fill_layer = np.zeros((height, width, 3), dtype=np.uint8)
+            
+            # Draw contours if requested (only if splines are not shown)
+            if show_contours and not show_splines:
                 for i, contour in enumerate(contours):
                     # Convert contour to the right format
                     if len(contour.shape) == 3:
@@ -108,7 +115,14 @@ class SafeGraphicsView(QGraphicsView):
                     else:
                         contour_points = contour
                     
-                    # Draw each contour in white with different shades for visibility
+                    # Check if contour is closed (first and last points are close)
+                    is_closed = self._is_contour_closed(contour_points)
+                    
+                    if is_closed:
+                        # Add fill to the single fill layer (light transparent white)
+                        cv2.fillPoly(fill_layer, [contour_points.astype(np.int32)], (200, 200, 200))
+                    
+                    # Draw contour outline in white
                     color_intensity = 200 + (i * 10) % 55  # Vary intensity slightly
                     cv2.drawContours(preview, [contour_points.astype(np.int32)], -1, (color_intensity, color_intensity, color_intensity), 2)
             
@@ -138,6 +152,13 @@ class SafeGraphicsView(QGraphicsView):
                         # Convert from contour format
                         spline_points = spline.reshape(-1, 2).astype(np.int32)
                     
+                    # Check if spline is closed
+                    is_closed = self._is_contour_closed(spline_points)
+                    
+                    if is_closed and show_contours:
+                        # Add fill to the single fill layer (light transparent green)
+                        cv2.fillPoly(fill_layer, [spline_points.astype(np.int32)], (0, 200, 0))
+                    
                     # Draw spline as connected lines in green
                     for j in range(len(spline_points) - 1):
                         pt1 = tuple(spline_points[j])
@@ -149,6 +170,10 @@ class SafeGraphicsView(QGraphicsView):
                         pt1 = tuple(spline_points[-1])
                         pt2 = tuple(spline_points[0])
                         cv2.line(preview, pt1, pt2, (0, 255, 0), 3)
+            
+            # Blend the single fill layer with the preview (only if there are fills)
+            if np.any(fill_layer):
+                preview = cv2.addWeighted(preview, 0.7, fill_layer, 0.3, 0)
             
             # Convert to QPixmap and display
             rgb_preview = cv2.cvtColor(preview, cv2.COLOR_BGR2RGB)
@@ -168,6 +193,21 @@ class SafeGraphicsView(QGraphicsView):
             print(f"Error in DXF preview: {e}")
             # Fallback to just printing info
             print(f"DXF Preview: {len(contours)} contours, {len(splines) if splines else 0} splines")
+    
+    def _is_contour_closed(self, points):
+        """Check if contour is closed (first and last points are close)"""
+        try:
+            import numpy as np
+            if len(points) < 3:
+                return False
+            
+            first_point = points[0]
+            last_point = points[-1]
+            distance = np.sqrt((first_point[0] - last_point[0])**2 + (first_point[1] - last_point[1])**2)
+            
+            return distance < 5.0  # Within 5 pixels is considered closed
+        except:
+            return False
     
     def fit_in_view(self):
         """Fit image in view"""
@@ -221,6 +261,40 @@ class SafeGraphicsView(QGraphicsView):
                       zoom_in_factor if delta > 0 else zoom_out_factor)
         
         event.accept()
+    
+    def mousePressEvent(self, event):
+        """Handle mouse press for panning"""
+        if event.button() == Qt.LeftButton:
+            # Start panning
+            self.panning = True
+            self.last_pan_point = event.pos()
+            self.setCursor(Qt.ClosedHandCursor)
+        super().mousePressEvent(event)
+    
+    def mouseMoveEvent(self, event):
+        """Handle mouse move for panning"""
+        if self.panning and self.last_pan_point is not None:
+            # Calculate pan delta
+            delta = event.pos() - self.last_pan_point
+            
+            # Pan the view
+            h_bar = self.horizontalScrollBar()
+            v_bar = self.verticalScrollBar()
+            h_bar.setValue(h_bar.value() - delta.x())
+            v_bar.setValue(v_bar.value() - delta.y())
+            
+            # Update last pan point
+            self.last_pan_point = event.pos()
+        super().mouseMoveEvent(event)
+    
+    def mouseReleaseEvent(self, event):
+        """Handle mouse release for panning"""
+        if event.button() == Qt.LeftButton:
+            # Stop panning
+            self.panning = False
+            self.last_pan_point = None
+            self.setCursor(Qt.ArrowCursor)
+        super().mouseReleaseEvent(event)
 
 
 class FixedImageEmbossWindow(QMainWindow):

@@ -35,6 +35,14 @@ torch-*.whl
 torchvision-*.whl
 torchaudio-*.whl
 
+# Model weights cache
+model_weights/
+*.pth
+checkpoints/
+.cache/
+torch/
+hub/
+
 # Logs and output files
 *.log
 errorOutput.txt

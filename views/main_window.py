@@ -373,6 +373,8 @@ class MainWindow(QMainWindow):
         self.viewmodel.model_status_updated.connect(self._on_model_status_updated)
         self.viewmodel.image_loaded.connect(self._on_image_loaded)
         self.viewmodel.image_load_failed.connect(self._on_image_load_failed)
+        self.viewmodel.processing_completed.connect(self._on_processing_completed)
+        self.viewmodel.processing_failed.connect(self._on_processing_failed)
         
         # Connect header signals
         self.header.menu_action_triggered.connect(self._on_menu_action)
@@ -419,6 +421,25 @@ class MainWindow(QMainWindow):
         self._log_message(f"Image loading failed: {error_message}")
         QMessageBox.critical(self, "Error", f"Failed to load image:\n{error_message}")
     
+    def _on_processing_completed(self, result_pixmap, parameters_used):
+        """Handle successful image processing"""
+        # Display the processed image in the center panel
+        self._display_processed_image(result_pixmap)
+        
+        # Display parameters in the right panel
+        self._display_processing_parameters(parameters_used)
+        
+        self._log_message("Image processing completed successfully!")
+        self.header.set_status_message("Processing completed")
+        self.process_btn.setEnabled(True)
+    
+    def _on_processing_failed(self, error_message: str):
+        """Handle image processing failure"""
+        self._log_message(f"Processing failed: {error_message}")
+        self.header.set_status_message("Processing failed")
+        self.process_btn.setEnabled(True)
+        QMessageBox.critical(self, "Processing Error", f"Failed to process image:\n{error_message}")
+    
     def _display_image_with_aspect_ratio(self, pixmap):
         """Display image maintaining aspect ratio"""
         # Calculate scaled size to fit in the preview area while maintaining aspect ratio
@@ -446,6 +467,64 @@ class MainWindow(QMainWindow):
         # Display the scaled image
         self.image_preview.setPixmap(scaled_pixmap)
         self.image_preview.setText("")  # Clear any text
+    
+    def _display_processed_image(self, pixmap):
+        """Display the processed image in the center panel"""
+        # Calculate scaled size to fit in the processing area while maintaining aspect ratio
+        max_width = 600  # Larger area for processed image
+        max_height = 400
+        
+        # Get original dimensions
+        original_width = pixmap.width()
+        original_height = pixmap.height()
+        
+        # Calculate scale factor to fit within bounds
+        scale_x = max_width / original_width
+        scale_y = max_height / original_height
+        scale = min(scale_x, scale_y)  # Use the smaller scale to fit both dimensions
+        
+        # Calculate new dimensions
+        new_width = int(original_width * scale)
+        new_height = int(original_height * scale)
+        
+        # Scale the pixmap
+        scaled_pixmap = pixmap.scaled(new_width, new_height, 
+                                    Qt.AspectRatioMode.KeepAspectRatio, 
+                                    Qt.TransformationMode.SmoothTransformation)
+        
+        # Display the processed image
+        self.processing_area.setPixmap(scaled_pixmap)
+        self.processing_area.setText("")  # Clear any text
+    
+    def _display_processing_parameters(self, parameters):
+        """Display processing parameters in the right panel"""
+        # Create a formatted text display of parameters
+        param_text = "Processing Parameters:\n\n"
+        for key, value in parameters.items():
+            param_text += f"• {key.replace('_', ' ').title()}: {value}\n"
+        
+        # Update the parameters panel
+        if hasattr(self, 'params_label'):
+            self.params_label.setText(param_text)
+        else:
+            # Create the label if it doesn't exist
+            self.params_label = QLabel(param_text)
+            self.params_label.setStyleSheet("""
+                QLabel {
+                    color: #adb5bd;
+                    padding: 15px;
+                    font-size: 11px;
+                    line-height: 1.4;
+                }
+            """)
+            self.params_label.setWordWrap(True)
+            self.params_label.setAlignment(Qt.AlignmentFlag.AlignTop)
+            
+            # Replace the placeholder in the right panel
+            right_layout = self.right_panel.layout()
+            if right_layout.count() > 1:  # Remove the placeholder
+                right_layout.removeItem(right_layout.itemAt(1))
+            right_layout.addWidget(self.params_label)
     
     def _on_menu_action(self, action: str):
         """Handle menu actions"""
@@ -572,9 +651,12 @@ class MainWindow(QMainWindow):
             pixmap = self.viewmodel.get_current_image_pixmap()
             self._log_message(f"Processing image: {pixmap.width()}x{pixmap.height()}")
             
-            # For now, simulate processing time
-            # TODO: Implement actual model inference here using viewmodel.predict_image()
-            QTimer.singleShot(2000, self._on_processing_complete)
+            # Use viewmodel to process the image
+            success = self.viewmodel.process_image()
+            if not success:
+                self._log_message("Processing failed")
+                self.header.set_status_message("Processing failed")
+                self.process_btn.setEnabled(True)
             
         except Exception as e:
             self._log_message(f"Error during processing: {str(e)}")

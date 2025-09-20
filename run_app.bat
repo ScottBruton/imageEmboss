@@ -1,21 +1,39 @@
 @echo off
-echo Starting ImageEmboss...
+echo Starting ImageEmboss Application...
 echo.
 
-REM Check if virtual environment exists
-if exist "venv\Scripts\activate.bat" (
-    echo Activating virtual environment...
-    call venv\Scripts\activate.bat
-) else (
-    echo Virtual environment not found. Creating one...
-    python -m venv venv
-    call venv\Scripts\activate.bat
-    echo Installing packages...
-    python install_packages.py
+:: Check if virtual environment exists
+if not exist "venv" (
+    echo Virtual environment not found!
+    echo Please run SetupEnvironment.bat first to create the environment.
+    pause
+    exit /b 1
 )
 
-echo.
-echo Starting ImageEmboss application...
+:: Activate virtual environment
+echo Activating virtual environment...
+call venv\Scripts\activate.bat
+
+:: Check if PySide6 is installed
+echo Checking PySide6 installation...
+python -c "import PySide6" 2>nul
+if errorlevel 1 (
+    echo PySide6 not found! Installing...
+    pip install "PySide6>=6.5.0"
+    if errorlevel 1 (
+        echo Failed to install PySide6!
+        pause
+        exit /b 1
+    )
+)
+
+:: Run the application
+echo Starting ImageEmboss...
 python main.py
 
-pause
+:: Keep window open if there's an error
+if errorlevel 1 (
+    echo.
+    echo Application exited with an error.
+    pause
+)

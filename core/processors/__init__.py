@@ -1,3 +1,0 @@
-"""
-Image processing pipeline steps
-"""

@@ -690,29 +690,33 @@ Disadvantages:
     def _load_model(self):
         """Load the configured model"""
         try:
-            # Create configuration from current settings
-            model_type = self.model_type_combo.currentData()
-            encoder = self.encoder_combo.currentData()
-            weights = self.weights_combo.currentText()
-            in_channels = self.input_channels.value()
-            classes = self.output_classes.value()
-            activation = self.activation_combo.currentText()
-            if activation == "None":
-                activation = None
-            
-            custom_name = self.custom_name.currentText()
-            if not custom_name:
-                custom_name = f"{model_type.value}_{encoder.value}"
-            
-            config = ModelConfig(
-                model_type=model_type,
-                encoder_name=encoder,
-                encoder_weights=weights,
-                in_channels=in_channels,
-                classes=classes,
-                activation=activation,
-                model_name=custom_name
-            )
+            # Use the selected model's configuration if available
+            if self.selected_config:
+                config = self.selected_config
+            else:
+                # Fallback to creating configuration from current settings
+                model_type = self.model_type_combo.currentData()
+                encoder = self.encoder_combo.currentData()
+                weights = self.weights_combo.currentText()
+                in_channels = self.input_channels.value()
+                classes = self.output_classes.value()
+                activation = self.activation_combo.currentText()
+                if activation == "None":
+                    activation = None
+                
+                custom_name = self.custom_name.currentText()
+                if not custom_name:
+                    custom_name = f"{model_type.value}_{encoder.value}"
+                
+                config = ModelConfig(
+                    model_type=model_type,
+                    encoder_name=encoder,
+                    encoder_weights=weights,
+                    in_channels=in_channels,
+                    classes=classes,
+                    activation=activation,
+                    model_name=custom_name
+                )
             
             # Emit signal with configuration
             self.model_selected.emit(config)

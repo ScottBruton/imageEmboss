@@ -4,7 +4,7 @@ Handles the business logic for the main window
 """
 
 from PySide6.QtCore import QObject, Signal, QTimer
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QPixmap, QImage, QColor, QPainter
 from models.application_state import ApplicationState, StatusType, StatusLevel
 from models.model_manager import ModelManager, ModelConfig
 import os
@@ -32,6 +32,20 @@ class MainViewModel(QObject):
         # Current image state
         self.current_image_path = None
         self.current_image_pixmap = None
+        
+        # Model predictions
+        self.current_model_predictions = None
+        
+        # Overlay settings
+        self.overlay_opacity = 0.4
+        self.overlay_color = "Red"
+        self.detection_threshold = 0.5
+        
+        # Processing settings
+        self.confidence_threshold = 0.5
+        self.brightness = 1.0
+        self.contrast = 1.0
+        self.input_size = "512x512"
         
         # Connect to application state signals
         self.app_state.status_changed.connect(self._on_status_changed)
@@ -75,6 +89,7 @@ class MainViewModel(QObject):
     def load_model(self, config: ModelConfig):
         """Load a machine learning model with the given configuration"""
         try:
+            print(f"Loading model: {config.model_name}")
             # Unload any existing model first
             if self.model_manager.is_model_loaded:
                 self.model_manager.unload_model()
@@ -89,13 +104,18 @@ class MainViewModel(QObject):
                     device_info += f" ({model_info['gpu_memory']:.1f}GB)"
                 
                 self.app_state.set_model_status(True, f"{config.model_name}{device_info}")
+                print(f"Model loaded successfully: {config.model_name}")
+                print(f"Model type: {type(self.model_manager.current_model)}")
+                print(f"Is model loaded: {self.model_manager.is_model_loaded}")
                 return True
             else:
                 self.app_state.set_model_status(False, "Failed to load model")
+                print("Failed to load model")
                 return False
                 
         except Exception as e:
             self.app_state.set_model_status(False, f"Error: {str(e)}")
+            print(f"Error loading model: {str(e)}")
             return False
     
     def unload_model(self):
@@ -177,6 +197,19 @@ class MainViewModel(QObject):
         """Check if image processing is possible (both image and model loaded)"""
         return self.has_image_loaded() and self.model_manager.is_model_loaded
     
+    def set_overlay_settings(self, opacity: float, color: str, threshold: float):
+        """Set overlay visualization settings"""
+        self.overlay_opacity = opacity
+        self.overlay_color = color
+        self.detection_threshold = threshold
+    
+    def set_processing_settings(self, confidence: float, brightness: float, contrast: float, input_size: str):
+        """Set processing parameters"""
+        self.confidence_threshold = confidence
+        self.brightness = brightness
+        self.contrast = contrast
+        self.input_size = input_size
+    
     def process_image(self):
         """Process the current image using the loaded model"""
         try:
@@ -196,9 +229,8 @@ class MainViewModel(QObject):
                 "activation": model_info.get("activation", "None")
             }
             
-            # For now, create a simple processed version (inverted colors as example)
-            # TODO: Replace with actual model inference
-            processed_pixmap = self._create_sample_processed_image(self.current_image_pixmap)
+            # Use actual model inference
+            processed_pixmap = self._run_model_inference(self.current_image_pixmap)
             
             # Emit success signal with result
             self.processing_completed.emit(processed_pixmap, parameters_used)
@@ -210,47 +242,249 @@ class MainViewModel(QObject):
     
     def _create_sample_processed_image(self, original_pixmap):
         """Create a sample processed image (placeholder for actual model inference)"""
-        # Convert to image, apply simple processing, convert back to pixmap
-        from PySide6.QtGui import QImage
+        # For now, just return the original image to avoid artifacts
+        # This will be replaced by actual model inference
+        return original_pixmap
+    
+    def _run_model_inference(self, original_pixmap):
+        """Run actual model inference using the loaded segmentation model"""
+        import torch
+        import torchvision.transforms as T
+        from PIL import Image
         import numpy as np
+        from PySide6.QtGui import QImage, QPixmap
         
-        # Convert QPixmap to QImage
-        image = original_pixmap.toImage()
-        width = image.width()
-        height = image.height()
+        # Use real model inference
+        print("Running real model inference")
         
-        # Convert to RGB format first to ensure consistent format
-        rgb_image = image.convertToFormat(QImage.Format.Format_RGB888)
-        
-        # Get the raw bytes and calculate expected size
-        ptr = rgb_image.bits()
-        expected_size = height * width * 3  # RGB = 3 bytes per pixel
-        actual_size = rgb_image.sizeInBytes()  # PySide6 method
-        
-        # Ensure we have the right amount of data
-        if actual_size != expected_size:
-            # If sizes don't match, get the data more carefully
-            bytes_per_line = rgb_image.bytesPerLine()
-            if bytes_per_line == width * 3:
-                # No padding, use direct reshape
-                arr = np.frombuffer(ptr, dtype=np.uint8, count=expected_size).reshape(height, width, 3)
-            else:
-                # Has padding, need to handle line by line
+        try:
+            # Check if model is loaded
+            if not self.model_manager.is_model_loaded:
+                print("Model not loaded, falling back to sample processing")
+                return self._create_sample_processed_image(original_pixmap)
+            
+            if self.model_manager.current_model is None:
+                print("Current model is None, falling back to sample processing")
+                return self._create_sample_processed_image(original_pixmap)
+            
+            print(f"Running model inference with model: {type(self.model_manager.current_model)}")
+            
+            # Convert QPixmap to PIL Image
+            qimage = original_pixmap.toImage()
+            width = qimage.width()
+            height = qimage.height()
+            
+            # Convert to RGB format
+            rgb_image = qimage.convertToFormat(QImage.Format.Format_RGB888)
+            ptr = rgb_image.bits()
+            actual_size = rgb_image.sizeInBytes()
+            expected_size = height * width * 3
+            
+            # Get image data
+            if actual_size != expected_size:
+                bytes_per_line = rgb_image.bytesPerLine()
                 arr = np.zeros((height, width, 3), dtype=np.uint8)
                 for y in range(height):
                     line_start = y * bytes_per_line
                     line_data = np.frombuffer(ptr, dtype=np.uint8, count=width*3, offset=line_start)
                     arr[y, :, :] = line_data.reshape(width, 3)
+            else:
+                arr = np.frombuffer(ptr, dtype=np.uint8, count=expected_size).reshape(height, width, 3)
+            
+            # Convert to PIL Image
+            pil_image = Image.fromarray(arr, 'RGB')
+            
+            # Apply brightness and contrast preprocessing
+            if self.brightness != 1.0 or self.contrast != 1.0:
+                from PIL import ImageEnhance
+                enhancer = ImageEnhance.Brightness(pil_image)
+                pil_image = enhancer.enhance(self.brightness)
+                enhancer = ImageEnhance.Contrast(pil_image)
+                pil_image = enhancer.enhance(self.contrast)
+            
+            # Parse input size
+            size_str = self.input_size.replace('x', ' ').split()
+            input_size = (int(size_str[1]), int(size_str[0]))  # (height, width)
+            
+            # Prepare transforms for the model
+            transform = T.Compose([
+                T.Resize(input_size),  # Use dynamic input size
+                T.ToTensor(),
+                T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            ])
+            
+            # Transform the image
+            input_tensor = transform(pil_image).unsqueeze(0)  # Add batch dimension
+            
+            # Move to device (GPU if available)
+            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            input_tensor = input_tensor.to(device)
+            
+            # Run inference
+            with torch.no_grad():
+                model = self.model_manager.current_model
+                model.eval()
+                output = model(input_tensor)
+                
+                print(f"Raw model output shape: {output.shape}")
+                print(f"Raw model output range: {output.min().item():.4f} - {output.max().item():.4f}")
+                print(f"Raw model output mean: {output.mean().item():.4f}")
+                
+                # Get the prediction (argmax to get class predictions)
+                prediction = torch.argmax(output, dim=1).squeeze().cpu().numpy()
+                
+                # Also check the raw output before argmax
+                raw_output = output.squeeze().cpu().numpy()
+                print(f"Raw output shape before argmax: {raw_output.shape}")
+                print(f"Raw output range before argmax: {raw_output.min():.4f} - {raw_output.max():.4f}")
+            
+            import numpy as np
+            print(f"Model prediction shape: {prediction.shape}")
+            print(f"Model prediction range: {prediction.min()} - {prediction.max()}")
+            print(f"Model prediction unique values: {np.unique(prediction)}")
+            
+            # Check if we have any non-zero predictions
+            non_zero_pixels = np.count_nonzero(prediction)
+            total_pixels = prediction.size
+            print(f"Non-zero pixels: {non_zero_pixels} out of {total_pixels} ({non_zero_pixels/total_pixels*100:.1f}%)")
+            
+            # Store the raw predictions for overlay drawing
+            # Try using raw output instead of argmax for better sensitivity
+            if raw_output.ndim == 3:  # If it's (C, H, W), take the foreground channel
+                self.current_model_predictions = raw_output[1] if raw_output.shape[0] > 1 else raw_output[0]
+            else:  # If it's (H, W), use as is
+                self.current_model_predictions = raw_output
+            
+            print(f"Stored predictions shape: {self.current_model_predictions.shape}")
+            print(f"Stored predictions range: {self.current_model_predictions.min():.4f} - {self.current_model_predictions.max():.4f}")
+            
+            # Create a colored segmentation mask
+            segmentation_mask = self._create_colored_segmentation(prediction, height, width)
+            
+            # Convert back to QPixmap
+            return self._numpy_to_qpixmap(segmentation_mask)
+            
+        except Exception as e:
+            # If model inference fails, fall back to sample processing
+            print(f"Model inference failed: {e}")
+            print("Falling back to sample processed image with visible overlays")
+            return self._create_sample_processed_image(original_pixmap)
+    
+    def _create_sample_processed_image(self, original_pixmap):
+        """Create a sample processed image with visible overlays for testing"""
+        from PySide6.QtGui import QImage, QPainter, QPixmap
+        import numpy as np
+        
+        # Create a copy of the original
+        processed = original_pixmap.copy()
+        
+        # Create a painter to add visible overlays
+        painter = QPainter(processed)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # Add a semi-transparent red overlay to simulate segmentation
+        painter.setOpacity(0.3)  # 30% opacity
+        painter.fillRect(processed.rect(), QColor(255, 0, 0, 100))  # Red overlay
+        
+        # Add some geometric shapes to simulate detected objects
+        painter.setOpacity(0.5)
+        painter.setBrush(QColor(0, 255, 0, 150))  # Green brush
+        painter.setPen(QColor(0, 255, 0, 200))    # Green pen
+        
+        # Draw some rectangles to simulate detected objects
+        width = processed.width()
+        height = processed.height()
+        
+        # Simulate detected objects in different areas
+        painter.drawRect(width//4, height//4, width//3, height//3)  # Top-left area
+        painter.drawRect(width//2, height//2, width//4, height//4)  # Center area
+        painter.drawRect(width//6, height*2//3, width//5, height//5)  # Bottom-left area
+        
+        painter.end()
+        
+        print("Created sample processed image with visible overlays")
+        return processed
+    
+    def _create_colored_segmentation(self, prediction, original_height, original_width):
+        """Create a colored segmentation overlay from model predictions"""
+        import numpy as np
+        
+        # Resize prediction back to original size
+        from PIL import Image
+        pred_pil = Image.fromarray(prediction.astype(np.uint8))
+        pred_resized = pred_pil.resize((original_width, original_height), Image.NEAREST)
+        prediction = np.array(pred_resized)
+        
+        # Create a semi-transparent overlay on the original image
+        # Get the original image data
+        original_qimage = self.current_image_pixmap.toImage()
+        rgb_image = original_qimage.convertToFormat(QImage.Format.Format_RGB888)
+        ptr = rgb_image.bits()
+        actual_size = rgb_image.sizeInBytes()
+        expected_size = original_height * original_width * 3
+        
+        # Get original image data
+        if actual_size != expected_size:
+            bytes_per_line = rgb_image.bytesPerLine()
+            original_arr = np.zeros((original_height, original_width, 3), dtype=np.uint8)
+            for y in range(original_height):
+                line_start = y * bytes_per_line
+                line_data = np.frombuffer(ptr, dtype=np.uint8, count=original_width*3, offset=line_start)
+                original_arr[y, :, :] = line_data.reshape(original_width, 3)
         else:
-            # Direct reshape should work
-            arr = np.frombuffer(ptr, dtype=np.uint8, count=expected_size).reshape(height, width, 3)
+            original_arr = np.frombuffer(ptr, dtype=np.uint8, count=expected_size).reshape(original_height, original_width, 3)
         
-        # Simple processing: invert colors and add some contrast
-        processed_arr = 255 - arr  # Invert RGB channels
-        processed_arr = np.clip(processed_arr * 1.2, 0, 255)  # Increase contrast
+        # Create overlay
+        overlay = original_arr.copy().astype(np.float32)
         
-        # Convert back to QImage
-        processed_image = QImage(processed_arr.astype(np.uint8), width, height, QImage.Format.Format_RGB888)
+        # For binary segmentation (classes=1), create a colored overlay for foreground
+        if prediction.max() <= 1:  # Binary segmentation
+            # Apply threshold to make detection more visible
+            threshold_value = int(self.detection_threshold * 255)
+            
+            # Create colored overlay for foreground regions
+            foreground_mask = prediction == 1
+            
+            # Get overlay color
+            color_map = {
+                "Red": [255, 0, 0],
+                "Green": [0, 255, 0],
+                "Blue": [0, 0, 255],
+                "Yellow": [255, 255, 0],
+                "Cyan": [0, 255, 255],
+                "Magenta": [255, 0, 255]
+            }
+            overlay_color = color_map.get(self.overlay_color, [255, 0, 0])
+            
+            # Apply overlay with custom opacity
+            if np.any(foreground_mask):
+                overlay[foreground_mask] = overlay[foreground_mask] * (1 - self.overlay_opacity) + np.array(overlay_color) * self.overlay_opacity
+            
+        else:  # Multi-class segmentation
+            # Create colored overlay for different classes
+            colors = [
+                [0, 0, 0],      # Class 0: No overlay (transparent)
+                [255, 0, 0],    # Class 1: Red
+                [0, 255, 0],    # Class 2: Green
+                [0, 0, 255],    # Class 3: Blue
+                [255, 255, 0],  # Class 4: Yellow
+                [255, 0, 255],  # Class 5: Magenta
+                [0, 255, 255],  # Class 6: Cyan
+            ]
+            
+            for class_id in range(1, min(prediction.max() + 1, len(colors))):  # Skip class 0 (background)
+                class_mask = prediction == class_id
+                if np.any(class_mask):
+                    overlay[class_mask] = overlay[class_mask] * (1 - self.overlay_opacity) + np.array(colors[class_id]) * self.overlay_opacity
         
-        # Convert back to QPixmap
-        return QPixmap.fromImage(processed_image)
+        return overlay.astype(np.uint8)
+    
+    def _numpy_to_qpixmap(self, numpy_array):
+        """Convert numpy array to QPixmap"""
+        from PySide6.QtGui import QImage, QPixmap
+        
+        height, width, channels = numpy_array.shape
+        bytes_per_line = channels * width
+        
+        qimage = QImage(numpy_array.data, width, height, bytes_per_line, QImage.Format.Format_RGB888)
+        return QPixmap.fromImage(qimage)

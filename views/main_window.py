@@ -100,7 +100,7 @@ class MainWindow(QMainWindow):
         
         # Right panel - Parameters and controls (narrower)
         self.right_panel = self._create_right_panel()
-        self.right_panel.setMaximumWidth(400)  # Increased maximum width
+        self.right_panel.setMaximumWidth(500)  # Increased maximum width for better parameter visibility
         grid_layout.addWidget(self.right_panel, 0, 3, 2, 1)
         
         # Bottom panel - Logs and output
@@ -362,34 +362,8 @@ class MainWindow(QMainWindow):
         """)
         layout.addWidget(title)
         
-        # Processing Controls Section - Scrollable
-        controls_scroll = QScrollArea()
-        controls_scroll.setWidgetResizable(True)
-        controls_scroll.setMaximumHeight(200)  # Limit height to make it scrollable
-        controls_scroll.setStyleSheet("""
-            QScrollArea {
-                background-color: #1a1d23;
-                border: 1px solid #495057;
-                border-radius: 4px;
-            }
-            QScrollBar:vertical {
-                background-color: #343a40;
-                width: 12px;
-                border-radius: 6px;
-            }
-            QScrollBar::handle:vertical {
-                background-color: #495057;
-                border-radius: 6px;
-                min-height: 20px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background-color: #6c757d;
-            }
-        """)
-        
-        controls_widget = QWidget()
-        controls_layout = QVBoxLayout(controls_widget)
-        controls_layout.setContentsMargins(10, 10, 10, 10)
+        # Processing Controls Section - Direct layout (no nesting)
+        # Remove the scroll area and put controls directly in the main layout
         
             # Overlay Opacity Slider removed - no longer needed
         
@@ -403,7 +377,7 @@ class MainWindow(QMainWindow):
                 margin-bottom: 10px;
             }
         """)
-        controls_layout.addWidget(color_label)
+        layout.addWidget(color_label)
         
         self.overlay_color_combo = QComboBox()
         self.overlay_color_combo.addItems(["Red", "Green", "Blue", "Yellow", "Cyan", "Magenta"])
@@ -439,7 +413,7 @@ class MainWindow(QMainWindow):
             }
         """)
         self.overlay_color_combo.currentTextChanged.connect(self._on_overlay_color_changed)
-        controls_layout.addWidget(self.overlay_color_combo)
+        layout.addWidget(self.overlay_color_combo)
         
         # Detection Threshold
         threshold_label = QLabel("Detection Threshold:")
@@ -451,7 +425,7 @@ class MainWindow(QMainWindow):
                 margin-bottom: 10px;
             }
         """)
-        controls_layout.addWidget(threshold_label)
+        layout.addWidget(threshold_label)
         
         # Threshold Slider with inline value
         threshold_layout = QHBoxLayout()
@@ -494,10 +468,10 @@ class MainWindow(QMainWindow):
         self.threshold_value_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         threshold_layout.addWidget(self.threshold_value_label)
         
-        controls_layout.addLayout(threshold_layout)
+        layout.addLayout(threshold_layout)
         
         # Add spacing between sections
-        controls_layout.addSpacing(30)
+        layout.addSpacing(30)
         
         # Model Settings Section
         model_label = QLabel("Model Settings:")
@@ -509,7 +483,7 @@ class MainWindow(QMainWindow):
                 margin-bottom: 10px;
             }
         """)
-        controls_layout.addWidget(model_label)
+        layout.addWidget(model_label)
         
         # Input Size
         input_size_layout = QHBoxLayout()
@@ -561,7 +535,7 @@ class MainWindow(QMainWindow):
         self.input_size_combo.currentTextChanged.connect(self._on_parameter_changed)
         input_size_layout.addWidget(self.input_size_combo)
         
-        controls_layout.addLayout(input_size_layout)
+        layout.addLayout(input_size_layout)
         
         # Confidence Threshold
         confidence_layout = QHBoxLayout()
@@ -614,10 +588,10 @@ class MainWindow(QMainWindow):
         self.confidence_value_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         confidence_layout.addWidget(self.confidence_value_label)
         
-        controls_layout.addLayout(confidence_layout)
+        layout.addLayout(confidence_layout)
         
         # Add spacing between sections
-        controls_layout.addSpacing(30)
+        layout.addSpacing(30)
         
         # Preprocessing Section
         preprocessing_label = QLabel("Preprocessing:")
@@ -629,7 +603,7 @@ class MainWindow(QMainWindow):
                 margin-bottom: 10px;
             }
         """)
-        controls_layout.addWidget(preprocessing_label)
+        layout.addWidget(preprocessing_label)
         
         # Brightness
         brightness_layout = QHBoxLayout()
@@ -682,7 +656,7 @@ class MainWindow(QMainWindow):
         self.brightness_value_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         brightness_layout.addWidget(self.brightness_value_label)
         
-        controls_layout.addLayout(brightness_layout)
+        layout.addLayout(brightness_layout)
         
         # Contrast
         contrast_layout = QHBoxLayout()
@@ -735,10 +709,10 @@ class MainWindow(QMainWindow):
         self.contrast_value_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         contrast_layout.addWidget(self.contrast_value_label)
         
-        controls_layout.addLayout(contrast_layout)
+        layout.addLayout(contrast_layout)
         
         # Add spacing between sections
-        controls_layout.addSpacing(30)
+        layout.addSpacing(30)
         
         # Post-processing Section
         postprocessing_label = QLabel("Post-processing:")
@@ -750,7 +724,7 @@ class MainWindow(QMainWindow):
                 margin-bottom: 10px;
             }
         """)
-        controls_layout.addWidget(postprocessing_label)
+        layout.addWidget(postprocessing_label)
         
         # Overlay Opacity (re-added)
         overlay_opacity_layout = QHBoxLayout()
@@ -803,11 +777,9 @@ class MainWindow(QMainWindow):
         self.overlay_opacity_value_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         overlay_opacity_layout.addWidget(self.overlay_opacity_value_label)
         
-        controls_layout.addLayout(overlay_opacity_layout)
+        layout.addLayout(overlay_opacity_layout)
         
-        # Set the scroll area widget
-        controls_scroll.setWidget(controls_widget)
-        layout.addWidget(controls_scroll)
+        # No scroll area needed - controls are directly in the main layout
         
         # Processing Parameters removed from right panel - moved to bottom tabs
         
@@ -992,8 +964,8 @@ class MainWindow(QMainWindow):
             self._log_message(f"Processed image hash: {processed_hash}")
             self._log_message(f"Images are {'different' if original_hash != processed_hash else 'identical'}")
         
-        # Display the processed image in the center panel
-        self._display_processed_image(result_pixmap)
+        # Display the processed image with current overlay settings
+        self._update_image_blend()
         
         # Display parameters in the right panel
         self._display_processing_parameters(parameters_used)
@@ -1230,7 +1202,31 @@ class MainWindow(QMainWindow):
         
         # Trigger real-time reprocessing if we have a processed image
         if self.processed_image_pixmap is not None:
-            self._reprocess_with_new_settings()
+            # Check if we need full reprocessing (brightness, contrast, input size, or confidence changes)
+            brightness = self.brightness_slider.value() / 100.0
+            contrast = self.contrast_slider.value() / 100.0
+            input_size = self.input_size_combo.currentText()
+            confidence = self.confidence_slider.value() / 100.0
+            
+            needs_full_reprocess = (
+                brightness != 1.0 or 
+                contrast != 1.0 or 
+                input_size != "512x512" or 
+                confidence != 0.5
+            )
+            
+            if needs_full_reprocess:
+                # Use a timer to debounce rapid changes for full reprocessing
+                if not hasattr(self, '_reprocess_timer'):
+                    self._reprocess_timer = QTimer()
+                    self._reprocess_timer.setSingleShot(True)
+                    self._reprocess_timer.timeout.connect(self._reprocess_with_new_settings)
+                
+                self._reprocess_timer.stop()  # Stop any existing timer
+                self._reprocess_timer.start(300)  # 300ms delay
+            else:
+                # Immediate update for overlay-only changes
+                self._reprocess_with_new_settings()
     
     def _update_image_blend(self):
         """Update the displayed image based on transparency slider"""
@@ -1432,8 +1428,22 @@ class MainWindow(QMainWindow):
         self.viewmodel.set_overlay_settings(overlay_opacity, overlay_color, threshold)
         self.viewmodel.set_processing_settings(confidence, brightness, contrast, input_size)
         
-        # Update the transparency blend with new overlay settings
-        self._update_image_blend()
+        # Check if we need full reprocessing (brightness, contrast, input size, or confidence changes)
+        # These parameters affect the model input, so we need to run inference again
+        needs_full_reprocess = (
+            brightness != 1.0 or 
+            contrast != 1.0 or 
+            input_size != "512x512" or 
+            confidence != 0.5
+        )
+        
+        if needs_full_reprocess:
+            # Full reprocessing with new parameters
+            self._log_message(f"Reprocessing with new parameters: brightness={brightness:.2f}, contrast={contrast:.2f}, input_size={input_size}")
+            self.viewmodel.process_image()
+        else:
+            # Just update the overlay display
+            self._update_image_blend()
     
     def _on_menu_action(self, action: str):
         """Handle menu actions"""

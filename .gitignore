@@ -1,45 +1,100 @@
-# 3D Model Files
-*.step
-*.stl
-*.obj
-
-# DXF Files (can be large)
-*.dxf
-
-# FreeCAD Virtual Environment
-venv_freecad/
-venv_freecad_*/
-
-# Python Cache
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 
-# Virtual Environments
+# Virtual Environment
 venv/
 env/
 ENV/
+env.bak/
+venv.bak/
+.venv/
 
-# IDE Files
+# PyTorch wheel files (local downloads)
+*.whl
+torch-*.whl
+torchvision-*.whl
+torchaudio-*.whl
+
+# Logs and output files
+*.log
+errorOutput.txt
+*.out
+*.err
+
+# IDE and editor files
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
+*.sublime-*
 
-# OS Files
+# OS generated files
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
+desktop.ini
 
-# Log Files
-*.log
-
-# Temporary Files
+# Temporary files
+temp_reqs.txt
 *.tmp
 *.temp
+*.bak
+*.backup
 
-# Large Image Files (if needed)
-# *.jpg
-# *.jpeg
-# *.png
-# *.tiff
+# Batch files and scripts (if they contain sensitive info)
+# Uncomment if needed:
+# *.bat
+# *.cmd
+
+# Test files and images
+test*.png
+test*.jpg
+test*.jpeg
+test*.bmp
+test*.tiff
+sample*.png
+sample*.jpg
+
+# Configuration files with local paths
+config_local.py
+settings_local.py
+local_config.ini
+
+# Cache directories
+.cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json

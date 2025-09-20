@@ -239,7 +239,7 @@ class MainViewModel(QObject):
             # Create model config
             config = ModelConfig(
                 model_type=model_type_enum,
-                encoder=encoder_enum,
+                encoder_name=encoder_enum,
                 classes=1,
                 activation="sigmoid"
             )

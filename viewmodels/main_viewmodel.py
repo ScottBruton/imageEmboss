@@ -5,6 +5,7 @@ Handles the business logic for the main window
 
 from PySide6.QtCore import QObject, Signal, QTimer
 from models.application_state import ApplicationState, StatusType, StatusLevel
+from models.model_manager import ModelManager, ModelConfig
 
 
 class MainViewModel(QObject):
@@ -18,6 +19,9 @@ class MainViewModel(QObject):
     def __init__(self, app_state: ApplicationState):
         super().__init__()
         self.app_state = app_state
+        
+        # Initialize model manager
+        self.model_manager = ModelManager(device="auto")
         
         # Connect to application state signals
         self.app_state.status_changed.connect(self._on_status_changed)
@@ -58,15 +62,48 @@ class MainViewModel(QObject):
         """Get all status indicators"""
         return self.app_state.get_all_status()
     
-    def load_model(self, model_name: str):
-        """Load a machine learning model"""
-        # This would be implemented based on your specific model loading needs
-        # For now, just update the status
-        self.app_state.set_model_status(True, model_name)
+    def load_model(self, config: ModelConfig):
+        """Load a machine learning model with the given configuration"""
+        try:
+            # Unload any existing model first
+            if self.model_manager.is_model_loaded:
+                self.model_manager.unload_model()
+            
+            # Load the new model
+            success = self.model_manager.load_model(config)
+            
+            if success:
+                model_info = self.model_manager.get_model_info()
+                device_info = f" on {model_info['device']}"
+                if model_info.get('gpu_memory'):
+                    device_info += f" ({model_info['gpu_memory']:.1f}GB)"
+                
+                self.app_state.set_model_status(True, f"{config.model_name}{device_info}")
+                return True
+            else:
+                self.app_state.set_model_status(False, "Failed to load model")
+                return False
+                
+        except Exception as e:
+            self.app_state.set_model_status(False, f"Error: {str(e)}")
+            return False
     
     def unload_model(self):
         """Unload the current model"""
+        if self.model_manager.is_model_loaded:
+            self.model_manager.unload_model()
         self.app_state.set_model_status(False)
+    
+    def get_model_manager(self) -> ModelManager:
+        """Get the model manager instance"""
+        return self.model_manager
+    
+    def predict_image(self, image):
+        """Run inference on an image using the loaded model"""
+        if not self.model_manager.is_model_loaded:
+            raise ValueError("No model loaded")
+        
+        return self.model_manager.predict(image)
     
     @property
     def gpu_available(self) -> bool:

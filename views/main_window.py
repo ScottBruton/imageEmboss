@@ -5,12 +5,14 @@ The main application window with grid layout
 
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                             QGridLayout, QSplitter, QFrame, QLabel, QTextEdit,
-                            QPushButton, QFileDialog, QMessageBox)
+                            QPushButton, QFileDialog, QMessageBox, QDialog)
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QFont, QPalette, QColor
 from viewmodels.main_viewmodel import MainViewModel
 from components.header_component import HeaderComponent
 from models.application_state import StatusType, StatusLevel
+from modals.model_selection_dialog import ModelSelectionDialog
+from models.model_manager import ModelConfig
 
 
 class MainWindow(QMainWindow):
@@ -414,8 +416,43 @@ class MainWindow(QMainWindow):
         self._log_message("Save project as...")
     
     def _load_model(self):
-        self.viewmodel.load_model("Segmentation Model")
-        self._log_message("Loading model...")
+        """Open model selection dialog and load selected model"""
+        try:
+            # Create and show model selection dialog
+            dialog = ModelSelectionDialog(self.viewmodel.get_model_manager(), self)
+            dialog.model_selected.connect(self._on_model_selected)
+            
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                self._log_message("Model selection dialog closed")
+            else:
+                self._log_message("Model loading cancelled")
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open model selection dialog:\n{str(e)}")
+            self._log_message(f"Error opening model dialog: {str(e)}")
+    
+    def _on_model_selected(self, config: ModelConfig):
+        """Handle model selection from dialog"""
+        try:
+            self._log_message(f"Loading model: {config.model_name}")
+            
+            # Show loading message
+            self.header.set_status_message("Loading model...")
+            
+            # Load the model
+            success = self.viewmodel.load_model(config)
+            
+            if success:
+                self._log_message(f"Model loaded successfully: {config.model_name}")
+                self.header.set_status_message("Model loaded successfully")
+            else:
+                self._log_message("Failed to load model")
+                self.header.set_status_message("Failed to load model")
+                
+        except Exception as e:
+            self._log_message(f"Error loading model: {str(e)}")
+            self.header.set_status_message(f"Error: {str(e)}")
+            QMessageBox.critical(self, "Model Loading Error", f"Failed to load model:\n{str(e)}")
     
     def _show_settings(self):
         self._log_message("Settings dialog opened")
@@ -431,7 +468,28 @@ class MainWindow(QMainWindow):
             self.showFullScreen()
     
     def _process_image(self):
-        self._log_message("Processing image...")
+        """Process the loaded image using the loaded model"""
+        if not self.viewmodel.model_loaded:
+            QMessageBox.warning(self, "No Model", "Please load a model first before processing images.")
+            return
+        
+        # Check if an image is loaded (this would need to be implemented)
+        # For now, just simulate processing
+        self._log_message("Processing image with loaded model...")
         self.process_btn.setEnabled(False)
-        # Simulate processing
-        QTimer.singleShot(2000, lambda: self.process_btn.setEnabled(True))
+        self.header.set_status_message("Processing image...")
+        
+        try:
+            # Simulate processing time
+            QTimer.singleShot(2000, self._on_processing_complete)
+            
+        except Exception as e:
+            self._log_message(f"Error during processing: {str(e)}")
+            self.header.set_status_message("Processing failed")
+            self.process_btn.setEnabled(True)
+    
+    def _on_processing_complete(self):
+        """Handle completion of image processing"""
+        self._log_message("Image processing completed!")
+        self.header.set_status_message("Processing completed")
+        self.process_btn.setEnabled(True)

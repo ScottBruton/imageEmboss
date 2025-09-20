@@ -5,9 +5,10 @@ The main application window with grid layout
 
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                             QGridLayout, QSplitter, QFrame, QLabel, QTextEdit,
-                            QPushButton, QFileDialog, QMessageBox, QDialog)
+                            QPushButton, QFileDialog, QMessageBox, QDialog, QScrollArea)
 from PySide6.QtCore import Qt, Signal, QTimer
-from PySide6.QtGui import QFont, QPalette, QColor
+from PySide6.QtGui import QFont, QPalette, QColor, QPixmap
+import os
 from viewmodels.main_viewmodel import MainViewModel
 from components.header_component import HeaderComponent
 from models.application_state import StatusType, StatusLevel
@@ -78,16 +79,24 @@ class MainWindow(QMainWindow):
     def _create_grid_sections(self, grid_layout: QGridLayout):
         """Create the grid sections for the main content"""
         
-        # Left panel - Image input/processing
+        # Set column stretch to control panel widths
+        grid_layout.setColumnStretch(0, 2)  # Left panel - slightly wider
+        grid_layout.setColumnStretch(1, 3)  # Center panel - larger
+        grid_layout.setColumnStretch(2, 3)  # Center panel - larger
+        grid_layout.setColumnStretch(3, 2)  # Right panel - slightly wider
+        
+        # Left panel - Image input/processing (narrower)
         self.left_panel = self._create_left_panel()
+        self.left_panel.setMaximumWidth(400)  # Increased maximum width
         grid_layout.addWidget(self.left_panel, 0, 0, 2, 1)
         
         # Center panel - Main workspace
         self.center_panel = self._create_center_panel()
         grid_layout.addWidget(self.center_panel, 0, 1, 2, 2)
         
-        # Right panel - Parameters and controls
+        # Right panel - Parameters and controls (narrower)
         self.right_panel = self._create_right_panel()
+        self.right_panel.setMaximumWidth(400)  # Increased maximum width
         grid_layout.addWidget(self.right_panel, 0, 3, 2, 1)
         
         # Bottom panel - Logs and output
@@ -142,21 +151,47 @@ class MainWindow(QMainWindow):
         self.load_image_btn.clicked.connect(self._load_image)
         layout.addWidget(self.load_image_btn)
         
-        # Image preview area
+        # Image preview area with scroll
+        self.image_scroll = QScrollArea()
+        self.image_scroll.setStyleSheet("""
+            QScrollArea {
+                background-color: #343a40;
+                border: 2px dashed #495057;
+                border-radius: 4px;
+            }
+            QScrollBar:vertical {
+                background-color: #495057;
+                width: 12px;
+                border-radius: 6px;
+            }
+            QScrollBar::handle:vertical {
+                background-color: #6c757d;
+                border-radius: 6px;
+                min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background-color: #adb5bd;
+            }
+        """)
+        self.image_scroll.setWidgetResizable(True)
+        self.image_scroll.setMinimumHeight(200)
+        self.image_scroll.setMaximumWidth(300)  # Limit width to original size
+        
+        # Image label for displaying the actual image
         self.image_preview = QLabel("No image loaded")
         self.image_preview.setStyleSheet("""
             QLabel {
                 background-color: #343a40;
-                border: 2px dashed #495057;
-                border-radius: 4px;
                 color: #adb5bd;
                 padding: 20px;
-                text-align: center;
             }
         """)
         self.image_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.image_preview.setMinimumHeight(200)
-        layout.addWidget(self.image_preview)
+        self.image_preview.setScaledContents(False)  # Don't stretch, maintain aspect ratio
+        self.image_preview.setMinimumSize(200, 200)
+        
+        self.image_scroll.setWidget(self.image_preview)
+        layout.addWidget(self.image_scroll)
         
         layout.addStretch()
         return panel
@@ -336,6 +371,8 @@ class MainWindow(QMainWindow):
         self.viewmodel.status_updated.connect(self._on_status_updated)
         self.viewmodel.gpu_status_updated.connect(self._on_gpu_status_updated)
         self.viewmodel.model_status_updated.connect(self._on_model_status_updated)
+        self.viewmodel.image_loaded.connect(self._on_image_loaded)
+        self.viewmodel.image_load_failed.connect(self._on_image_load_failed)
         
         # Connect header signals
         self.header.menu_action_triggered.connect(self._on_menu_action)
@@ -356,10 +393,59 @@ class MainWindow(QMainWindow):
         """Handle model status updates"""
         if is_loaded:
             self._log_message(f"Model Loaded: {model_name}")
-            self.process_btn.setEnabled(True)
+            # Enable process button only if image is also loaded
+            if self.viewmodel.has_image_loaded():
+                self.process_btn.setEnabled(True)
         else:
             self._log_message("No model loaded")
             self.process_btn.setEnabled(False)
+    
+    def _on_image_loaded(self, file_path: str, pixmap):
+        """Handle successful image loading"""
+        # Display the image with proper aspect ratio
+        self._display_image_with_aspect_ratio(pixmap)
+        
+        # Log success
+        filename = os.path.basename(file_path)
+        self._log_message(f"Image loaded successfully: {filename}")
+        self._log_message(f"Image dimensions: {pixmap.width()}x{pixmap.height()}")
+        
+        # Enable process button if model is also loaded
+        if self.viewmodel.model_loaded:
+            self.process_btn.setEnabled(True)
+    
+    def _on_image_load_failed(self, error_message: str):
+        """Handle image loading failure"""
+        self._log_message(f"Image loading failed: {error_message}")
+        QMessageBox.critical(self, "Error", f"Failed to load image:\n{error_message}")
+    
+    def _display_image_with_aspect_ratio(self, pixmap):
+        """Display image maintaining aspect ratio"""
+        # Calculate scaled size to fit in the preview area while maintaining aspect ratio
+        max_width = 280  # Slightly less than the scroll area max width
+        max_height = 200
+        
+        # Get original dimensions
+        original_width = pixmap.width()
+        original_height = pixmap.height()
+        
+        # Calculate scale factor to fit within bounds
+        scale_x = max_width / original_width
+        scale_y = max_height / original_height
+        scale = min(scale_x, scale_y)  # Use the smaller scale to fit both dimensions
+        
+        # Calculate new dimensions
+        new_width = int(original_width * scale)
+        new_height = int(original_height * scale)
+        
+        # Scale the pixmap
+        scaled_pixmap = pixmap.scaled(new_width, new_height, 
+                                    Qt.AspectRatioMode.KeepAspectRatio, 
+                                    Qt.TransformationMode.SmoothTransformation)
+        
+        # Display the scaled image
+        self.image_preview.setPixmap(scaled_pixmap)
+        self.image_preview.setText("")  # Clear any text
     
     def _on_menu_action(self, action: str):
         """Handle menu actions"""
@@ -402,12 +488,13 @@ class MainWindow(QMainWindow):
         self._log_message("New project created")
     
     def _load_image(self):
+        """Load image using viewmodel (MVVM pattern)"""
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Load Image", "", "Image Files (*.png *.jpg *.jpeg *.bmp *.tiff)"
         )
         if file_path:
-            self._log_message(f"Image loaded: {file_path}")
-            self.image_preview.setText(f"Image: {file_path.split('/')[-1]}")
+            # Use viewmodel to load the image
+            self.viewmodel.load_image(file_path)
     
     def _save_project(self):
         self._log_message("Project saved")
@@ -469,18 +556,24 @@ class MainWindow(QMainWindow):
     
     def _process_image(self):
         """Process the loaded image using the loaded model"""
-        if not self.viewmodel.model_loaded:
-            QMessageBox.warning(self, "No Model", "Please load a model first before processing images.")
+        if not self.viewmodel.can_process_image():
+            if not self.viewmodel.model_loaded:
+                QMessageBox.warning(self, "No Model", "Please load a model first before processing images.")
+            elif not self.viewmodel.has_image_loaded():
+                QMessageBox.warning(self, "No Image", "Please load an image first before processing.")
             return
         
-        # Check if an image is loaded (this would need to be implemented)
-        # For now, just simulate processing
         self._log_message("Processing image with loaded model...")
         self.process_btn.setEnabled(False)
         self.header.set_status_message("Processing image...")
         
         try:
-            # Simulate processing time
+            # Get image info from viewmodel
+            pixmap = self.viewmodel.get_current_image_pixmap()
+            self._log_message(f"Processing image: {pixmap.width()}x{pixmap.height()}")
+            
+            # For now, simulate processing time
+            # TODO: Implement actual model inference here using viewmodel.predict_image()
             QTimer.singleShot(2000, self._on_processing_complete)
             
         except Exception as e:

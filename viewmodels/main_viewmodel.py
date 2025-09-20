@@ -4,8 +4,10 @@ Handles the business logic for the main window
 """
 
 from PySide6.QtCore import QObject, Signal, QTimer
+from PySide6.QtGui import QPixmap
 from models.application_state import ApplicationState, StatusType, StatusLevel
 from models.model_manager import ModelManager, ModelConfig
+import os
 
 
 class MainViewModel(QObject):
@@ -15,6 +17,8 @@ class MainViewModel(QObject):
     status_updated = Signal(StatusType, StatusLevel, str, str)  # type, level, message, details
     gpu_status_updated = Signal(bool, str)  # is_available, device_name
     model_status_updated = Signal(bool, str)  # is_loaded, model_name
+    image_loaded = Signal(str, QPixmap)  # file_path, pixmap
+    image_load_failed = Signal(str)  # error_message
     
     def __init__(self, app_state: ApplicationState):
         super().__init__()
@@ -22,6 +26,10 @@ class MainViewModel(QObject):
         
         # Initialize model manager
         self.model_manager = ModelManager(device="auto")
+        
+        # Current image state
+        self.current_image_path = None
+        self.current_image_pixmap = None
         
         # Connect to application state signals
         self.app_state.status_changed.connect(self._on_status_changed)
@@ -124,3 +132,45 @@ class MainViewModel(QObject):
     def model_name(self) -> str:
         """Get loaded model name"""
         return self.app_state.model_name
+    
+    def load_image(self, file_path: str):
+        """Load an image from file path"""
+        try:
+            # Validate file exists
+            if not os.path.exists(file_path):
+                self.image_load_failed.emit(f"File not found: {file_path}")
+                return False
+            
+            # Load the image
+            pixmap = QPixmap(file_path)
+            if pixmap.isNull():
+                self.image_load_failed.emit(f"Failed to load image: {file_path}")
+                return False
+            
+            # Store the image data
+            self.current_image_path = file_path
+            self.current_image_pixmap = pixmap
+            
+            # Emit success signal
+            self.image_loaded.emit(file_path, pixmap)
+            return True
+            
+        except Exception as e:
+            self.image_load_failed.emit(f"Error loading image: {str(e)}")
+            return False
+    
+    def get_current_image_path(self) -> str:
+        """Get the current image file path"""
+        return self.current_image_path
+    
+    def get_current_image_pixmap(self) -> QPixmap:
+        """Get the current image pixmap"""
+        return self.current_image_pixmap
+    
+    def has_image_loaded(self) -> bool:
+        """Check if an image is currently loaded"""
+        return self.current_image_path is not None and self.current_image_pixmap is not None
+    
+    def can_process_image(self) -> bool:
+        """Check if image processing is possible (both image and model loaded)"""
+        return self.has_image_loaded() and self.model_manager.is_model_loaded

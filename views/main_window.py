@@ -905,6 +905,7 @@ class MainWindow(QMainWindow):
         
         # Connect header signals
         self.header.menu_action_triggered.connect(self._on_menu_action)
+        self.header.model_selected.connect(self._on_model_selected_from_header)
     
     def _on_status_updated(self, status_type: StatusType, level: StatusLevel, message: str, details: str):
         """Handle status updates from viewmodel"""
@@ -1459,12 +1460,67 @@ class MainWindow(QMainWindow):
             self.close()
         elif action == "load_model":
             self._load_model()
+        elif action == "select_model":
+            self._select_model()
         elif action == "settings":
             self._show_settings()
         elif action == "about":
             self._show_about()
         elif action == "toggle_fullscreen":
             self._toggle_fullscreen()
+    
+    def _on_model_selected_from_header(self, model_name: str):
+        """Handle model selection from header dropdown"""
+        self._log_message(f"Model selected from header: {model_name}")
+        self._load_specific_model(model_name)
+    
+    def _select_model(self):
+        """Show model selection dialog"""
+        self._load_model()
+    
+    def _load_specific_model(self, model_name: str):
+        """Load a specific model and auto-reprocess if image is loaded"""
+        try:
+            # Parse model name to get type and encoder
+            if "PSPNet" in model_name:
+                model_type = "PSPNet"
+            elif "Unet" in model_name:
+                model_type = "Unet"
+            elif "Linknet" in model_name:
+                model_type = "Linknet"
+            else:
+                self._log_message(f"Unknown model type: {model_name}")
+                return
+            
+            if "ResNet101" in model_name:
+                encoder = "resnet101"
+            elif "ResNet50" in model_name:
+                encoder = "resnet50"
+            elif "ResNet34" in model_name:
+                encoder = "resnet34"
+            else:
+                self._log_message(f"Unknown encoder: {model_name}")
+                return
+            
+            self._log_message(f"Loading {model_type} with {encoder} encoder...")
+            
+            # Load the specific model
+            success = self.viewmodel.load_specific_model(model_type, encoder)
+            
+            if success:
+                self._log_message(f"Model loaded successfully: {model_name}")
+                
+                # Auto-reprocess if image is loaded
+                if self.viewmodel.has_image_loaded():
+                    self._log_message("Auto-reprocessing image with new model...")
+                    self.viewmodel.process_image()
+                else:
+                    self._log_message("No image loaded - model ready for processing")
+            else:
+                self._log_message(f"Failed to load model: {model_name}")
+                
+        except Exception as e:
+            self._log_message(f"Error loading model {model_name}: {str(e)}")
     
     def _update_all_status(self):
         """Update all status indicators"""

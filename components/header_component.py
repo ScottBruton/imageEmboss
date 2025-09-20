@@ -4,9 +4,9 @@ Contains the application header with menu and status indicators
 """
 
 from PySide6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QLabel, 
-                            QPushButton, QMenuBar, QMenu, QStatusBar, QFrame)
+                            QPushButton, QMenuBar, QMenu, QStatusBar, QFrame, QComboBox)
 from PySide6.QtCore import Qt, Signal, QTimer
-from PySide6.QtGui import QFont, QPalette, QColor, QPainter, QPen, QBrush
+from PySide6.QtGui import QFont, QPalette, QColor, QPainter, QPen, QBrush, QAction
 from models.application_state import StatusType, StatusLevel
 
 
@@ -63,11 +63,147 @@ class StatusPill(QWidget):
         painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, self.label)
 
 
+class ModelStatusPill(QWidget):
+    """Model status pill that shows current model and allows selection"""
+    
+    # Signals
+    model_selected = Signal(str)  # model_name
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.label = "MODEL"
+        self.status_level = StatusLevel.UNKNOWN
+        self.message = "Unknown"
+        self.details = ""
+        self.current_model = "MODEL"  # Will show model name when loaded
+        
+        self.setFixedSize(120, 30)
+        self.setToolTip(f"{self.label}: {self.message}")
+        
+        # Create model selection menu
+        self.model_menu = QMenu(self)
+        self.model_menu.setStyleSheet("""
+            QMenu {
+                background-color: #2c313a;
+                color: #ffffff;
+                border: 1px solid #495057;
+                border-radius: 4px;
+                padding: 4px;
+            }
+            QMenu::item {
+                padding: 8px 16px;
+                border-radius: 4px;
+            }
+            QMenu::item:selected {
+                background-color: #495057;
+            }
+        """)
+        
+        # Add model options
+        model_options = [
+            "PSPNet ResNet101",
+            "PSPNet ResNet50", 
+            "PSPNet ResNet34",
+            "Unet ResNet101",
+            "Unet ResNet50",
+            "Unet ResNet34",
+            "Linknet ResNet101",
+            "Linknet ResNet50",
+            "Linknet ResNet34"
+        ]
+        
+        for model_name in model_options:
+            action = QAction(model_name, self.model_menu)
+            action.triggered.connect(lambda checked, name=model_name: self._on_model_selected(name))
+            self.model_menu.addAction(action)
+    
+    def set_status(self, level: StatusLevel, message: str, details: str = ""):
+        """Update the status of the pill"""
+        self.status_level = level
+        self.message = message
+        self.details = details
+        self.setToolTip(f"{self.label}: {self.message}\n{self.details}")
+        
+        # Update pill text to show model name when loaded
+        if level == StatusLevel.SUCCESS:
+            # Extract model name from message
+            if "PSPNet ResNet101" in message:
+                self.current_model = "PSPNet ResNet101"
+            elif "PSPNet ResNet50" in message:
+                self.current_model = "PSPNet ResNet50"
+            elif "PSPNet ResNet34" in message:
+                self.current_model = "PSPNet ResNet34"
+            elif "Unet ResNet101" in message:
+                self.current_model = "Unet ResNet101"
+            elif "Unet ResNet50" in message:
+                self.current_model = "Unet ResNet50"
+            elif "Unet ResNet34" in message:
+                self.current_model = "Unet ResNet34"
+            elif "Linknet ResNet101" in message:
+                self.current_model = "Linknet ResNet101"
+            elif "Linknet ResNet50" in message:
+                self.current_model = "Linknet ResNet50"
+            elif "Linknet ResNet34" in message:
+                self.current_model = "Linknet ResNet34"
+            else:
+                self.current_model = "MODEL"  # Fallback
+        else:
+            self.current_model = "MODEL"  # Show "MODEL" when not loaded
+        
+        self.update()
+    
+    def _on_model_selected(self, model_name: str):
+        """Handle model selection from dropdown"""
+        self.model_selected.emit(model_name)
+    
+    def paintEvent(self, event):
+        """Custom paint event for the pill"""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # Get colors based on status level
+        if self.status_level == StatusLevel.SUCCESS:
+            bg_color = QColor(40, 167, 69)    # Green
+            text_color = QColor(255, 255, 255)  # White
+        elif self.status_level == StatusLevel.WARNING:
+            bg_color = QColor(255, 193, 7)    # Yellow
+            text_color = QColor(0, 0, 0)      # Black
+        elif self.status_level == StatusLevel.ERROR:
+            bg_color = QColor(220, 53, 69)    # Red
+            text_color = QColor(255, 255, 255)  # White
+        else:  # UNKNOWN
+            bg_color = QColor(108, 117, 125)  # Gray
+            text_color = QColor(255, 255, 255)  # White
+        
+        # Draw pill background
+        rect = self.rect()
+        painter.setBrush(QBrush(bg_color))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(rect, 15, 15)
+        
+        # Draw text (model name or "MODEL")
+        painter.setPen(QPen(text_color))
+        font = QFont("Segoe UI", 8, QFont.Weight.Bold)
+        painter.setFont(font)
+        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, self.current_model)
+    
+    def mousePressEvent(self, event):
+        """Handle mouse click to show model selection menu"""
+        if event.button() == Qt.MouseButton.LeftButton:
+            if self.status_level == StatusLevel.SUCCESS:
+                # Show model selection menu at cursor position
+                global_pos = self.mapToGlobal(event.pos())
+                self.model_menu.exec(global_pos)
+        super().mousePressEvent(event)
+    
+
+
 class HeaderComponent(QWidget):
     """Header component with menu and status indicators"""
     
     # Signals
     menu_action_triggered = Signal(str)  # action_name
+    model_selected = Signal(str)  # model_name
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -200,6 +336,9 @@ class HeaderComponent(QWidget):
         load_model_action = tools_menu.addAction("Load Model")
         load_model_action.triggered.connect(lambda: self.menu_action_triggered.emit("load_model"))
         
+        select_model_action = tools_menu.addAction("Select Model")
+        select_model_action.triggered.connect(lambda: self.menu_action_triggered.emit("select_model"))
+        
         settings_action = tools_menu.addAction("Settings")
         settings_action.triggered.connect(lambda: self.menu_action_triggered.emit("settings"))
         
@@ -220,7 +359,8 @@ class HeaderComponent(QWidget):
         self.status_layout.addWidget(self.cuda_pill)
         
         # ML Model Status
-        self.model_pill = StatusPill("MODEL")
+        self.model_pill = ModelStatusPill()
+        self.model_pill.model_selected.connect(self.model_selected.emit)
         self.status_layout.addWidget(self.model_pill)
         
         # System Status

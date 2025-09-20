@@ -210,6 +210,47 @@ class MainViewModel(QObject):
         self.contrast = contrast
         self.input_size = input_size
     
+    def load_specific_model(self, model_type: str, encoder: str):
+        """Load a specific model by type and encoder"""
+        try:
+            from models.model_manager import ModelConfig, ModelType, EncoderType
+            
+            # Convert string to enum
+            if model_type == "PSPNet":
+                model_type_enum = ModelType.PSPNET
+            elif model_type == "Unet":
+                model_type_enum = ModelType.UNET
+            elif model_type == "Linknet":
+                model_type_enum = ModelType.LINKNET
+            else:
+                print(f"Unknown model type: {model_type}")
+                return False
+            
+            if encoder == "resnet101":
+                encoder_enum = EncoderType.RESNET101
+            elif encoder == "resnet50":
+                encoder_enum = EncoderType.RESNET50
+            elif encoder == "resnet34":
+                encoder_enum = EncoderType.RESNET34
+            else:
+                print(f"Unknown encoder: {encoder}")
+                return False
+            
+            # Create model config
+            config = ModelConfig(
+                model_type=model_type_enum,
+                encoder=encoder_enum,
+                classes=1,
+                activation="sigmoid"
+            )
+            
+            # Load the model
+            return self.load_model(config)
+            
+        except Exception as e:
+            print(f"Error loading specific model: {e}")
+            return False
+    
     def process_image(self):
         """Process the current image using the loaded model"""
         try:

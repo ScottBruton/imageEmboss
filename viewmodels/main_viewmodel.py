@@ -21,6 +21,10 @@ class MainViewModel(QObject):
     image_load_failed = Signal(str)  # error_message
     processing_completed = Signal(QPixmap, dict)  # result_pixmap, parameters_used
     processing_failed = Signal(str)  # error_message
+    silhouette_extracted = Signal(int)  # path count
+    silhouette_failed = Signal(str)
+    dxf_exported = Signal(str, int)  # filepath, entity count
+    dxf_export_failed = Signal(str)
     
     def __init__(self, app_state: ApplicationState):
         super().__init__()
@@ -33,8 +37,10 @@ class MainViewModel(QObject):
         self.current_image_path = None
         self.current_image_pixmap = None
         
-        # Model predictions
+        # Model predictions and vector export paths
         self.current_model_predictions = None
+        self.dxf_paths = []
+        self.extraction_mode = None
         
         # Overlay settings
         self.overlay_opacity = 0.4
@@ -158,22 +164,30 @@ class MainViewModel(QObject):
     def load_image(self, file_path: str):
         """Load an image from file path"""
         try:
-            # Validate file exists
             if not os.path.exists(file_path):
                 self.image_load_failed.emit(f"File not found: {file_path}")
                 return False
             
-            # Load the image
-            pixmap = QPixmap(file_path)
+            from PySide6.QtGui import QImageReader
+            reader = QImageReader(file_path)
+            reader.setAutoTransform(True)
+            image = reader.read()
+            if image.isNull():
+                self.image_load_failed.emit(
+                    f"Failed to load image: {file_path} ({reader.errorString()})"
+                )
+                return False
+            
+            pixmap = QPixmap.fromImage(image)
             if pixmap.isNull():
                 self.image_load_failed.emit(f"Failed to load image: {file_path}")
                 return False
             
-            # Store the image data
             self.current_image_path = file_path
             self.current_image_pixmap = pixmap
-            
-            # Emit success signal
+            self.current_model_predictions = None
+            self.dxf_paths = []
+            self.extraction_mode = None
             self.image_loaded.emit(file_path, pixmap)
             return True
             
@@ -369,35 +383,50 @@ class MainViewModel(QObject):
                 
                 print(f"Raw model output shape: {output.shape}")
                 print(f"Raw model output range: {output.min().item():.4f} - {output.max().item():.4f}")
-                print(f"Raw model output mean: {output.mean().item():.4f}")
                 
-                # Get the prediction (argmax to get class predictions)
-                prediction = torch.argmax(output, dim=1).squeeze().cpu().numpy()
-                
-                # Also check the raw output before argmax
-                raw_output = output.squeeze().cpu().numpy()
-                print(f"Raw output shape before argmax: {raw_output.shape}")
-                print(f"Raw output range before argmax: {raw_output.min():.4f} - {raw_output.max():.4f}")
+                tensor = output.squeeze(0).cpu()
+                if tensor.dim() == 3 and tensor.shape[0] > 1:
+                    prediction = torch.argmax(tensor, dim=0).numpy().astype(np.uint8)
+                    prob_map = None
+                else:
+                    prob_map = tensor[0].numpy() if tensor.dim() == 3 else tensor.numpy()
+                    activation = getattr(self.model_manager.current_config, "activation", None)
+                    if activation == "sigmoid" or prob_map.min() < 0.0 or prob_map.max() > 1.0:
+                        prob_map = 1.0 / (1.0 + np.exp(-np.clip(prob_map, -20, 20)))
+                    
+                    threshold = max(self.detection_threshold, self.confidence_threshold)
+                    prediction = (prob_map >= threshold).astype(np.uint8)
             
-            import numpy as np
             print(f"Model prediction shape: {prediction.shape}")
             print(f"Model prediction range: {prediction.min()} - {prediction.max()}")
             print(f"Model prediction unique values: {np.unique(prediction)}")
             
-            # Check if we have any non-zero predictions
             non_zero_pixels = np.count_nonzero(prediction)
             total_pixels = prediction.size
             print(f"Non-zero pixels: {non_zero_pixels} out of {total_pixels} ({non_zero_pixels/total_pixels*100:.1f}%)")
             
-            # Store the raw predictions for overlay drawing
-            # Try using raw output instead of argmax for better sensitivity
-            if raw_output.ndim == 3:  # If it's (C, H, W), take the foreground channel
-                self.current_model_predictions = raw_output[1] if raw_output.shape[0] > 1 else raw_output[0]
-            else:  # If it's (H, W), use as is
-                self.current_model_predictions = raw_output
+            # Resize probability map to original image size for overlay drawing
+            if prob_map is not None:
+                from PIL import Image
+                prob_pil = Image.fromarray(prob_map.astype(np.float32))
+                prob_resized = np.array(prob_pil.resize((width, height), Image.BILINEAR))
+                self.current_model_predictions = prob_resized
+            else:
+                from PIL import Image
+                pred_pil = Image.fromarray(prediction.astype(np.uint8))
+                pred_resized = np.array(pred_pil.resize((width, height), Image.NEAREST))
+                self.current_model_predictions = pred_resized.astype(np.float32)
             
             print(f"Stored predictions shape: {self.current_model_predictions.shape}")
             print(f"Stored predictions range: {self.current_model_predictions.min():.4f} - {self.current_model_predictions.max():.4f}")
+
+            from utils.vector_utils import mask_to_centerline_paths
+            edge_mask = (
+                self.current_model_predictions
+                >= max(self.detection_threshold, self.confidence_threshold)
+            ).astype(np.uint8)
+            self.dxf_paths = mask_to_centerline_paths(edge_mask)
+            self.extraction_mode = "edges"
             
             # Create a colored segmentation mask
             segmentation_mask = self._create_colored_segmentation(prediction, height, width)
@@ -478,15 +507,10 @@ class MainViewModel(QObject):
         # Create overlay
         overlay = original_arr.copy().astype(np.float32)
         
-        # For binary segmentation (classes=1), create a colored overlay for foreground
-        if prediction.max() <= 1:  # Binary segmentation
-            # Apply threshold to make detection more visible
-            threshold_value = int(self.detection_threshold * 255)
+        # For binary segmentation, apply threshold on probability map
+        if prediction.max() <= 1:
+            foreground_mask = prediction > 0
             
-            # Create colored overlay for foreground regions
-            foreground_mask = prediction == 1
-            
-            # Get overlay color
             color_map = {
                 "Red": [255, 0, 0],
                 "Green": [0, 255, 0],
@@ -497,7 +521,6 @@ class MainViewModel(QObject):
             }
             overlay_color = color_map.get(self.overlay_color, [255, 0, 0])
             
-            # Apply overlay with custom opacity
             if np.any(foreground_mask):
                 overlay[foreground_mask] = overlay[foreground_mask] * (1 - self.overlay_opacity) + np.array(overlay_color) * self.overlay_opacity
             
@@ -529,3 +552,74 @@ class MainViewModel(QObject):
         
         qimage = QImage(numpy_array.data, width, height, bytes_per_line, QImage.Format.Format_RGB888)
         return QPixmap.fromImage(qimage)
+
+    def extract_silhouette(self) -> bool:
+        """Extract foreground/background silhouette boundary."""
+        try:
+            if not self.has_image_loaded():
+                self.silhouette_failed.emit("No image loaded")
+                return False
+
+            from utils.vector_utils import extract_silhouette as extract_silhouette_fn
+            from utils.vector_utils import contours_to_paths, rgb_array_from_pixmap
+            import numpy as np
+
+            rgb = rgb_array_from_pixmap(self.current_image_pixmap)
+            boundary_mask, contours = extract_silhouette_fn(rgb)
+
+            if not contours:
+                self.silhouette_failed.emit("No foreground silhouette found in image")
+                return False
+
+            self.current_model_predictions = boundary_mask.astype(np.float32)
+            self.dxf_paths = contours_to_paths(contours, close=True)
+            self.extraction_mode = "silhouette"
+            self.silhouette_extracted.emit(len(self.dxf_paths))
+            return True
+
+        except Exception as e:
+            self.silhouette_failed.emit(str(e))
+            return False
+
+    def refresh_dxf_paths_from_current_mask(self):
+        """Rebuild centerline paths after overlay/threshold changes."""
+        if self.extraction_mode == "silhouette" or self.current_model_predictions is None:
+            return
+
+        from utils.vector_utils import mask_to_centerline_paths
+        import numpy as np
+
+        threshold = max(self.detection_threshold, self.confidence_threshold)
+        mask = (self.current_model_predictions >= threshold).astype(np.uint8)
+        self.dxf_paths = mask_to_centerline_paths(mask)
+
+    def export_dxf(self, filepath: str) -> bool:
+        """Export current vector paths as single-stroke DXF polylines."""
+        try:
+            from utils.vector_utils import export_paths_to_dxf, mask_to_centerline_paths
+            import numpy as np
+
+            if not self.has_image_loaded():
+                self.dxf_export_failed.emit("No image loaded")
+                return False
+
+            paths = list(self.dxf_paths)
+
+            if not paths and self.current_model_predictions is not None:
+                mask = (self.current_model_predictions > 0).astype(np.uint8)
+                paths = mask_to_centerline_paths(mask)
+
+            if not paths:
+                self.dxf_export_failed.emit(
+                    "No vector paths to export. Run Extract Silhouette or Process Image first."
+                )
+                return False
+
+            height = self.current_image_pixmap.height()
+            count = export_paths_to_dxf(paths, filepath, height)
+            self.dxf_exported.emit(filepath, count)
+            return True
+
+        except Exception as e:
+            self.dxf_export_failed.emit(str(e))
+            return False

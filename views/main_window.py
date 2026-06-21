@@ -5,12 +5,14 @@ The main application window with grid layout
 
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                                 QGridLayout, QSplitter, QFrame, QLabel, QTextEdit,
-                                QPushButton, QFileDialog, QMessageBox, QDialog, QScrollArea, QTabWidget, QSlider, QSpinBox, QComboBox, QGroupBox)
+                                QPushButton, QFileDialog, QMessageBox, QDialog, QScrollArea, QTabWidget, QSlider, QSpinBox, QComboBox, QGroupBox, QSizePolicy)
 from PySide6.QtCore import Qt, Signal, QTimer
-from PySide6.QtGui import QFont, QPalette, QColor, QPixmap
+from PySide6.QtGui import QFont, QPalette, QColor, QPixmap, QPen, QImage
+from PySide6.QtCore import QPointF
 import os
 from viewmodels.main_viewmodel import MainViewModel
 from components.header_component import HeaderComponent
+from components.zoomable_image_view import ZoomableImageView
 from models.application_state import StatusType, StatusLevel
 from modals.model_selection_dialog import ModelSelectionDialog
 from models.model_manager import ModelConfig
@@ -26,6 +28,9 @@ class MainWindow(QMainWindow):
         # Store processed image for blending
         self.original_image_pixmap = None
         self.processed_image_pixmap = None
+        self._last_processed_input_size = None
+        self._preview_timer = None
+        self._model_reprocess_timer = None
         
         # Window properties
         self.setWindowTitle("ImageEmboss - Machine Learning Image Processing")
@@ -227,21 +232,11 @@ class MainWindow(QMainWindow):
         """)
         layout.addWidget(title)
         
-        # Processing area
-        self.processing_area = QLabel("Ready for image processing")
-        self.processing_area.setStyleSheet("""
-            QLabel {
-                background-color: #343a40;
-                border: 2px dashed #495057;
-                border-radius: 4px;
-                color: #adb5bd;
-                padding: 40px;
-                text-align: center;
-            }
-        """)
-        self.processing_area.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.processing_area.setMinimumHeight(400)
-        layout.addWidget(self.processing_area)
+        # Processing area with scroll + zoom
+        self.processing_view = ZoomableImageView("Ready for image processing")
+        self.processing_view.setMinimumHeight(300)
+        self.processing_view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        layout.addWidget(self.processing_view, 1)
         
             # Transparency Controls
         transparency_group = QFrame()
@@ -332,6 +327,31 @@ class MainWindow(QMainWindow):
         self.process_btn.setEnabled(False)
         self.process_btn.clicked.connect(self._process_image)
         layout.addWidget(self.process_btn)
+
+        self.extract_silhouette_btn = QPushButton("Extract Silhouette")
+        self.extract_silhouette_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #007bff;
+                color: #ffffff;
+                border: none;
+                padding: 12px;
+                border-radius: 4px;
+                font-weight: bold;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: #0069d9;
+            }
+            QPushButton:pressed {
+                background-color: #0062cc;
+            }
+            QPushButton:disabled {
+                background-color: #6c757d;
+            }
+        """)
+        self.extract_silhouette_btn.setEnabled(False)
+        self.extract_silhouette_btn.clicked.connect(self._extract_silhouette)
+        layout.addWidget(self.extract_silhouette_btn)
         
         return panel
     
@@ -902,6 +922,19 @@ class MainWindow(QMainWindow):
         self.viewmodel.image_load_failed.connect(self._on_image_load_failed)
         self.viewmodel.processing_completed.connect(self._on_processing_completed)
         self.viewmodel.processing_failed.connect(self._on_processing_failed)
+        self.viewmodel.silhouette_extracted.connect(self._on_silhouette_extracted)
+        self.viewmodel.silhouette_failed.connect(self._on_silhouette_failed)
+        self.viewmodel.dxf_exported.connect(self._on_dxf_exported)
+        self.viewmodel.dxf_export_failed.connect(self._on_dxf_export_failed)
+        
+        for slider in (
+            self.threshold_slider,
+            self.confidence_slider,
+            self.brightness_slider,
+            self.contrast_slider,
+            self.overlay_opacity_slider,
+        ):
+            slider.sliderMoved.connect(lambda _value: self._on_parameter_changed())
         
         # Connect header signals
         self.header.menu_action_triggered.connect(self._on_menu_action)
@@ -937,6 +970,7 @@ class MainWindow(QMainWindow):
         
         # Display the image with proper aspect ratio
         self._display_image_with_aspect_ratio(pixmap)
+        self.processing_view.set_pixmap(pixmap, fit=True)
         
         # Log success
         filename = os.path.basename(file_path)
@@ -946,6 +980,9 @@ class MainWindow(QMainWindow):
         # Enable process button if model is also loaded
         if self.viewmodel.model_loaded:
             self.process_btn.setEnabled(True)
+        self.extract_silhouette_btn.setEnabled(True)
+        self.viewmodel.dxf_paths = []
+        self.viewmodel.extraction_mode = None
     
     def _on_image_load_failed(self, error_message: str):
         """Handle image loading failure"""
@@ -956,6 +993,7 @@ class MainWindow(QMainWindow):
         """Handle successful image processing"""
         # Store the processed image
         self.processed_image_pixmap = result_pixmap
+        self._last_processed_input_size = self.input_size_combo.currentText()
         
         # Debug: Check if processed image is different from original
         if self.original_image_pixmap is not None:
@@ -966,6 +1004,7 @@ class MainWindow(QMainWindow):
             self._log_message(f"Images are {'different' if original_hash != processed_hash else 'identical'}")
         
         # Display the processed image with current overlay settings
+        self._sync_settings_to_viewmodel()
         self._update_image_blend()
         
         # Display parameters in the right panel
@@ -1016,33 +1055,12 @@ class MainWindow(QMainWindow):
         self.image_preview.setPixmap(scaled_pixmap)
         self.image_preview.setText("")  # Clear any text
     
-    def _display_processed_image(self, pixmap):
+    def _display_processed_image(self, pixmap, fit: bool = True):
         """Display the processed image in the center panel"""
-        # Calculate scaled size to fit in the processing area while maintaining aspect ratio
-        max_width = 600  # Larger area for processed image
-        max_height = 400
-        
-        # Get original dimensions
-        original_width = pixmap.width()
-        original_height = pixmap.height()
-        
-        # Calculate scale factor to fit within bounds
-        scale_x = max_width / original_width
-        scale_y = max_height / original_height
-        scale = min(scale_x, scale_y)  # Use the smaller scale to fit both dimensions
-        
-        # Calculate new dimensions
-        new_width = int(original_width * scale)
-        new_height = int(original_height * scale)
-        
-        # Scale the pixmap
-        scaled_pixmap = pixmap.scaled(new_width, new_height, 
-                                    Qt.AspectRatioMode.KeepAspectRatio, 
-                                    Qt.TransformationMode.SmoothTransformation)
-        
-        # Display the processed image
-        self.processing_area.setPixmap(scaled_pixmap)
-        self.processing_area.setText("")  # Clear any text
+        if fit or self.processing_view._source_pixmap is None:
+            self.processing_view.set_pixmap(pixmap, fit=True)
+        else:
+            self.processing_view.update_pixmap(pixmap)
     
     def _display_processing_parameters(self, parameters):
         """Display processing parameters in the Processing Parameters tab"""
@@ -1178,97 +1196,149 @@ class MainWindow(QMainWindow):
     def _on_transparency_changed(self, value):
         """Handle transparency slider change"""
         self.transparency_value_label.setText(f"{value}%")
-        self._log_message(f"Transparency slider changed to {value}%")
-        self._update_image_blend()
+        self._sync_settings_to_viewmodel()
+        self._schedule_preview_refresh()
     
     
     def _on_overlay_color_changed(self, color_name):
         """Handle overlay color change"""
-        # Trigger reprocessing with new color
-        if self.processed_image_pixmap is not None:
-            self._reprocess_with_new_settings()
+        self._sync_settings_to_viewmodel()
+        self._schedule_preview_refresh()
     
     def _on_threshold_changed(self, value):
         """Handle threshold slider change"""
         self.threshold_value_label.setText(f"{value}%")
         self._on_parameter_changed()
     
+    def _sync_settings_to_viewmodel(self):
+        """Push current UI settings to the viewmodel."""
+        overlay_opacity = self.overlay_opacity_slider.value() / 100.0
+        overlay_color = self.overlay_color_combo.currentText()
+        threshold = self.threshold_slider.value() / 100.0
+        confidence = self.confidence_slider.value() / 100.0
+        brightness = self.brightness_slider.value() / 100.0
+        contrast = self.contrast_slider.value() / 100.0
+        input_size = self.input_size_combo.currentText()
+        self.viewmodel.set_overlay_settings(overlay_opacity, overlay_color, threshold)
+        self.viewmodel.set_processing_settings(confidence, brightness, contrast, input_size)
+        self.viewmodel.refresh_dxf_paths_from_current_mask()
+
+    def _schedule_preview_refresh(self):
+        """Debounced fast preview refresh for slider changes."""
+        if self.original_image_pixmap is None:
+            return
+
+        if self._preview_timer is None:
+            self._preview_timer = QTimer(self)
+            self._preview_timer.setSingleShot(True)
+            self._preview_timer.timeout.connect(self._update_image_blend)
+
+        self._preview_timer.start(16)
+
+    def _schedule_model_reprocess(self):
+        """Debounced full model inference when input size changes."""
+        if not self.viewmodel.can_process_image() or self.processed_image_pixmap is None:
+            return
+
+        input_size = self.input_size_combo.currentText()
+        if input_size == self._last_processed_input_size:
+            return
+
+        if self._model_reprocess_timer is None:
+            self._model_reprocess_timer = QTimer(self)
+            self._model_reprocess_timer.setSingleShot(True)
+            self._model_reprocess_timer.timeout.connect(self._run_model_reprocess)
+
+        self._model_reprocess_timer.start(500)
+
+    def _run_model_reprocess(self):
+        """Run model inference after input-size changes."""
+        if not self.viewmodel.can_process_image():
+            return
+        self._sync_settings_to_viewmodel()
+        self._log_message(
+            f"Reprocessing for input size: {self.input_size_combo.currentText()}"
+        )
+        self.viewmodel.process_image()
+
     def _on_parameter_changed(self):
-        """Handle any parameter change - triggers real-time update"""
-        # Update value labels for sliders
+        """Handle any parameter change - refresh preview immediately."""
         self.confidence_value_label.setText(f"{self.confidence_slider.value()}%")
         self.brightness_value_label.setText(f"{self.brightness_slider.value()}%")
         self.contrast_value_label.setText(f"{self.contrast_slider.value()}%")
         self.overlay_opacity_value_label.setText(f"{self.overlay_opacity_slider.value()}%")
-        
-        # Trigger real-time reprocessing if we have a processed image
-        if self.processed_image_pixmap is not None:
-            # Check if we need full reprocessing (brightness, contrast, input size, or confidence changes)
-            brightness = self.brightness_slider.value() / 100.0
-            contrast = self.contrast_slider.value() / 100.0
-            input_size = self.input_size_combo.currentText()
-            confidence = self.confidence_slider.value() / 100.0
-            
-            needs_full_reprocess = (
-                brightness != 1.0 or 
-                contrast != 1.0 or 
-                input_size != "512x512" or 
-                confidence != 0.5
-            )
-            
-            if needs_full_reprocess:
-                # Use a timer to debounce rapid changes for full reprocessing
-                if not hasattr(self, '_reprocess_timer'):
-                    self._reprocess_timer = QTimer()
-                    self._reprocess_timer.setSingleShot(True)
-                    self._reprocess_timer.timeout.connect(self._reprocess_with_new_settings)
-                
-                self._reprocess_timer.stop()  # Stop any existing timer
-                self._reprocess_timer.start(300)  # 300ms delay
-            else:
-                # Immediate update for overlay-only changes
-                self._reprocess_with_new_settings()
+
+        if self.original_image_pixmap is None:
+            return
+
+        self._sync_settings_to_viewmodel()
+        self._schedule_preview_refresh()
+        self._schedule_model_reprocess()
     
     def _update_image_blend(self):
-        """Update the displayed image based on transparency slider"""
+        """Update the displayed image based on current settings."""
         if self.original_image_pixmap is None:
-            self._log_message("Cannot blend: missing original image")
             return
         
         transparency = self.transparency_slider.value() / 100.0
-        self._log_message(f"Background transparency: {transparency} (0=fully visible, 1=invisible)")
-        
-        # Create a new blended image with proper overlay control
         blended_pixmap = self._create_blended_image_with_overlays(transparency)
-        self._display_processed_image(blended_pixmap)
+        self._display_processed_image(blended_pixmap, fit=False)
     
+    def _get_display_background_pixmap(self):
+        """Return the source image with live brightness/contrast applied."""
+        brightness = self.brightness_slider.value() / 100.0
+        contrast = self.contrast_slider.value() / 100.0
+        if brightness == 1.0 and contrast == 1.0:
+            return self.original_image_pixmap
+
+        from PIL import Image, ImageEnhance
+        import numpy as np
+        from PySide6.QtGui import QImage
+
+        qimage = self.original_image_pixmap.toImage().convertToFormat(QImage.Format.Format_RGB888)
+        width = qimage.width()
+        height = qimage.height()
+        ptr = qimage.bits()
+        bytes_per_line = qimage.bytesPerLine()
+        arr = np.zeros((height, width, 3), dtype=np.uint8)
+        for y in range(height):
+            line_start = y * bytes_per_line
+            line_data = np.frombuffer(ptr, dtype=np.uint8, count=width * 3, offset=line_start)
+            arr[y, :, :] = line_data.reshape(width, 3)
+
+        pil_image = Image.fromarray(arr, "RGB")
+        if brightness != 1.0:
+            pil_image = ImageEnhance.Brightness(pil_image).enhance(brightness)
+        if contrast != 1.0:
+            pil_image = ImageEnhance.Contrast(pil_image).enhance(contrast)
+
+        adjusted = np.array(pil_image)
+        bytes_per_line = 3 * width
+        adjusted_qimage = QImage(
+            adjusted.data, width, height, bytes_per_line, QImage.Format.Format_RGB888
+        ).copy()
+        return QPixmap.fromImage(adjusted_qimage)
+
     def _create_blended_image_with_overlays(self, transparency):
         """Create a blended image where transparency controls background visibility, not overlays"""
-        from PySide6.QtGui import QPainter, QPixmap, QColor
+        from PySide6.QtGui import QPainter, QPixmap
         
-        # Create a new pixmap with the same size as the original
-        result = QPixmap(self.original_image_pixmap.size())
+        background = self._get_display_background_pixmap()
+        result = QPixmap(background.size())
         result.fill(Qt.GlobalColor.transparent)
         
-        # Create painter
         painter = QPainter(result)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
-        # Step 1: Draw the background image with transparency
-        # transparency = 0 means background is fully visible (no transparency)
-        # transparency = 1 means background is invisible (completely transparent)
-        painter.setOpacity(1.0 - transparency)  # Invert the transparency
-        painter.drawPixmap(0, 0, self.original_image_pixmap)
+        painter.setOpacity(1.0 - transparency)
+        painter.drawPixmap(0, 0, background)
         
-        # Step 2: Draw the overlays at full opacity (independent of background transparency)
-        painter.setOpacity(1.0)  # Full opacity for overlays
+        painter.setOpacity(1.0)
         
-        # Get overlay settings from the right panel
         overlay_opacity = self.overlay_opacity_slider.value() / 100.0
         overlay_color = self.overlay_color_combo.currentText()
         threshold = self.threshold_slider.value() / 100.0
         
-        # Create overlay based on the processed image
         self._draw_overlays(painter, overlay_opacity, overlay_color, threshold)
         
         painter.end()
@@ -1276,7 +1346,10 @@ class MainWindow(QMainWindow):
     
     def _draw_overlays(self, painter, overlay_opacity, overlay_color, threshold):
         """Draw overlays on the image based on actual model predictions"""
-        # Get the actual model predictions from the viewmodel
+        if getattr(self.viewmodel, "extraction_mode", None) == "silhouette":
+            self._draw_silhouette_overlays(painter, overlay_opacity, overlay_color)
+            return
+
         if hasattr(self.viewmodel, 'current_model_predictions') and self.viewmodel.current_model_predictions is not None:
             predictions = self.viewmodel.current_model_predictions
             print(f"Drawing overlays with predictions shape: {predictions.shape}")
@@ -1284,9 +1357,42 @@ class MainWindow(QMainWindow):
             print(f"Drawing overlays with threshold: {threshold}")
             self._draw_model_overlays(painter, predictions, overlay_opacity, overlay_color, threshold)
         else:
-            print("No model predictions available, using sample overlays")
-            # Fallback: draw sample overlays if no model predictions available
-            self._draw_sample_overlays(painter, overlay_opacity, overlay_color)
+            print("No model predictions available, using Canny edge extraction")
+            width = self.original_image_pixmap.width()
+            height = self.original_image_pixmap.height()
+            mask = self._extract_canny_edges(width, height)
+            if mask.sum() > 0:
+                self._draw_mask_overlays(painter, mask, width, height)
+
+    def _draw_silhouette_overlays(self, painter, overlay_opacity, overlay_color):
+        """Draw extracted silhouette paths as visible strokes on the image."""
+        paths = self.viewmodel.dxf_paths
+        if not paths:
+            return
+
+        color_map = {
+            "Red": (255, 0, 0),
+            "Green": (0, 255, 0),
+            "Blue": (0, 0, 255),
+            "Yellow": (255, 255, 0),
+            "Cyan": (0, 255, 255),
+            "Magenta": (255, 0, 255),
+        }
+        rgb = color_map.get(overlay_color, (255, 0, 0))
+        alpha = max(int(255 * overlay_opacity), 160)
+        pen = QPen(QColor(rgb[0], rgb[1], rgb[2], alpha))
+        pen.setWidth(3)
+        pen.setCosmetic(True)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+
+        for path in paths:
+            if len(path) < 2:
+                continue
+            for i in range(len(path) - 1):
+                x1, y1 = path[i]
+                x2, y2 = path[i + 1]
+                painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
     
     def _draw_model_overlays(self, painter, predictions, overlay_opacity, overlay_color, threshold):
         """Draw overlays based on actual model predictions"""
@@ -1314,34 +1420,61 @@ class MainWindow(QMainWindow):
         if hasattr(predictions, 'cpu'):
             predictions = predictions.cpu().numpy()
         
-        # Apply threshold to predictions
-        # Convert threshold from 0-100% to the actual prediction range
-        pred_min, pred_max = predictions.min(), predictions.max()
-        threshold_value = pred_min + (pred_max - pred_min) * threshold
+        # Resize predictions to match image dimensions if needed
+        if predictions.shape != (height, width):
+            from PIL import Image
+            pred_pil = Image.fromarray(predictions.astype(np.float32))
+            predictions = np.array(pred_pil.resize((width, height), Image.BILINEAR))
+        
+        # Apply threshold to predictions (0-1 probability map)
+        pred_min, pred_max = float(predictions.min()), float(predictions.max())
+        confidence = self.confidence_slider.value() / 100.0
+        effective_threshold = max(threshold, confidence)
+        if pred_max <= 1.0 and pred_min >= 0.0:
+            threshold_value = effective_threshold
+        else:
+            threshold_value = pred_min + (pred_max - pred_min) * effective_threshold
         
         print(f"Prediction range: {pred_min:.4f} - {pred_max:.4f}")
         print(f"Threshold value: {threshold_value:.4f} (from {threshold*100:.1f}% slider)")
         
-        binary_mask = (predictions > threshold_value).astype(np.uint8)
+        binary_mask = (predictions >= threshold_value).astype(np.uint8)
         
         print(f"Binary mask shape: {binary_mask.shape}")
-        print(f"Binary mask range: {binary_mask.min()} - {binary_mask.max()}")
         print(f"Binary mask sum (pixels above threshold): {binary_mask.sum()}")
         
-        # If no pixels are above threshold, try a lower threshold
+        # If no pixels detected, try Canny edge extraction on the source image
         if binary_mask.sum() == 0:
-            print("No pixels above threshold, trying lower threshold")
-            threshold_value = pred_min + (pred_max - pred_min) * 0.1  # Try 10% of range
-            binary_mask = (predictions > threshold_value).astype(np.uint8)
-            print(f"New binary mask sum: {binary_mask.sum()}")
+            print("No ML detections, falling back to Canny edge extraction")
+            binary_mask = self._extract_canny_edges(width, height)
         
-        # If still no pixels, show test overlays to verify the system works
         if binary_mask.sum() == 0:
-            print("Still no pixels detected, showing test overlays")
-            self._draw_sample_overlays(painter, overlay_opacity, overlay_color)
+            print("No edges detected")
         else:
-            # Draw overlays based on the binary mask
             self._draw_mask_overlays(painter, binary_mask, width, height)
+    
+    def _extract_canny_edges(self, width, height):
+        """Extract edges from the loaded image using Canny detection."""
+        import cv2
+        import numpy as np
+        from PySide6.QtGui import QImage
+        
+        if self.original_image_pixmap is None:
+            return np.zeros((height, width), dtype=np.uint8)
+        
+        qimage = self._get_display_background_pixmap().toImage().convertToFormat(QImage.Format.Format_RGB888)
+        ptr = qimage.bits()
+        arr = np.frombuffer(ptr, dtype=np.uint8, count=qimage.sizeInBytes())
+        arr = arr.reshape(qimage.height(), qimage.bytesPerLine())[:, : qimage.width() * 3]
+        arr = arr.reshape(qimage.height(), qimage.width(), 3)
+        gray = cv2.cvtColor(arr, cv2.COLOR_RGB2GRAY)
+        edges = cv2.Canny(gray, 50, 150)
+        
+        if edges.shape != (height, width):
+            from PIL import Image
+            edges = np.array(Image.fromarray(edges).resize((width, height), Image.NEAREST))
+        
+        return (edges > 0).astype(np.uint8)
     
     def _draw_mask_overlays(self, painter, mask, width, height):
         """Draw overlays based on a binary mask"""
@@ -1382,8 +1515,7 @@ class MainWindow(QMainWindow):
         overlay_image[detected_pixels] = color_rgba
         
         # Convert to QImage and draw
-        from PySide6.QtGui import QImage
-        qimage = QImage(overlay_image.data, width, height, QImage.Format.Format_RGBA8888)
+        qimage = QImage(overlay_image.data, width, height, QImage.Format.Format_RGBA8888).copy()
         painter.drawImage(0, 0, qimage)
     
     def _draw_sample_overlays(self, painter, overlay_opacity, overlay_color):
@@ -1413,38 +1545,9 @@ class MainWindow(QMainWindow):
     
     def _reprocess_with_new_settings(self):
         """Reprocess the image with new overlay settings"""
-        if not self.viewmodel.can_process_image():
-            return
-        
-        # Get current settings from all parameters
-        overlay_opacity = self.overlay_opacity_slider.value() / 100.0
-        overlay_color = self.overlay_color_combo.currentText()
-        threshold = self.threshold_slider.value() / 100.0
-        confidence = self.confidence_slider.value() / 100.0
-        brightness = self.brightness_slider.value() / 100.0
-        contrast = self.contrast_slider.value() / 100.0
-        input_size = self.input_size_combo.currentText()
-        
-        # Update viewmodel with new settings
-        self.viewmodel.set_overlay_settings(overlay_opacity, overlay_color, threshold)
-        self.viewmodel.set_processing_settings(confidence, brightness, contrast, input_size)
-        
-        # Check if we need full reprocessing (brightness, contrast, input size, or confidence changes)
-        # These parameters affect the model input, so we need to run inference again
-        needs_full_reprocess = (
-            brightness != 1.0 or 
-            contrast != 1.0 or 
-            input_size != "512x512" or 
-            confidence != 0.5
-        )
-        
-        if needs_full_reprocess:
-            # Full reprocessing with new parameters
-            self._log_message(f"Reprocessing with new parameters: brightness={brightness:.2f}, contrast={contrast:.2f}, input_size={input_size}")
-            self.viewmodel.process_image()
-        else:
-            # Just update the overlay display
-            self._update_image_blend()
+        self._sync_settings_to_viewmodel()
+        self._schedule_preview_refresh()
+        self._schedule_model_reprocess()
     
     def _on_menu_action(self, action: str):
         """Handle menu actions"""
@@ -1456,6 +1559,8 @@ class MainWindow(QMainWindow):
             self._save_project()
         elif action == "save_as":
             self._save_project_as()
+        elif action == "export_dxf":
+            self._export_dxf()
         elif action == "exit":
             self.close()
         elif action == "load_model":
@@ -1555,6 +1660,74 @@ class MainWindow(QMainWindow):
     
     def _save_project_as(self):
         self._log_message("Save project as...")
+
+    def _export_dxf(self):
+        """Export single-stroke centerline paths to DXF."""
+        if not self.viewmodel.has_image_loaded():
+            QMessageBox.warning(self, "No Image", "Load an image before exporting DXF.")
+            return
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Export DXF", "", "DXF Files (*.dxf)"
+        )
+        if not file_path:
+            return
+        if not file_path.lower().endswith(".dxf"):
+            file_path += ".dxf"
+
+        self.viewmodel.export_dxf(file_path)
+
+    def _extract_silhouette(self):
+        """Extract foreground/background silhouette boundary."""
+        if not self.viewmodel.has_image_loaded():
+            QMessageBox.warning(self, "No Image", "Please load an image first.")
+            return
+
+        self.extract_silhouette_btn.setEnabled(False)
+        self.header.set_status_message("Extracting silhouette...")
+        self._log_message("Extracting foreground silhouette...")
+
+        if self.viewmodel.extract_silhouette():
+            self.processed_image_pixmap = self.original_image_pixmap
+            self._sync_settings_to_viewmodel()
+            transparency = self.transparency_slider.value() / 100.0
+            blended = self._create_blended_image_with_overlays(transparency)
+            self.processing_view.set_pixmap(blended, fit=True)
+        else:
+            self.extract_silhouette_btn.setEnabled(True)
+
+    def _on_silhouette_extracted(self, path_count: int):
+        self.extract_silhouette_btn.setEnabled(True)
+        self.header.set_status_message("Silhouette extracted")
+        pixel_count = 0
+        if self.viewmodel.current_model_predictions is not None:
+            pixel_count = int((self.viewmodel.current_model_predictions > 0).sum())
+        self._log_message(
+            f"Silhouette extracted: {path_count} path(s), {pixel_count} boundary pixels highlighted"
+        )
+        self._log_message(
+            "Silhouette shown in overlay color — adjust Overlay Opacity/Color in Parameters if needed"
+        )
+
+    def _on_silhouette_failed(self, error_message: str):
+        self.extract_silhouette_btn.setEnabled(True)
+        self.header.set_status_message("Silhouette extraction failed")
+        self._log_message(f"Silhouette extraction failed: {error_message}")
+        QMessageBox.warning(self, "Silhouette Extraction", error_message)
+
+    def _on_dxf_exported(self, filepath: str, entity_count: int):
+        self.header.set_status_message("DXF exported")
+        self._log_message(f"DXF exported: {entity_count} stroke(s) -> {filepath}")
+        QMessageBox.information(
+            self,
+            "Export Complete",
+            f"Exported {entity_count} single-stroke polyline(s) to:\n{filepath}",
+        )
+
+    def _on_dxf_export_failed(self, error_message: str):
+        self.header.set_status_message("DXF export failed")
+        self._log_message(f"DXF export failed: {error_message}")
+        QMessageBox.warning(self, "DXF Export", error_message)
     
     def _load_model(self):
         """Open model selection dialog and load selected model"""

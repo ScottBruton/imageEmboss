@@ -310,6 +310,9 @@ class HeaderComponent(QWidget):
         save_as_action = file_menu.addAction("Save As...")
         save_as_action.triggered.connect(lambda: self.menu_action_triggered.emit("save_as"))
         
+        export_dxf_action = file_menu.addAction("Export DXF...")
+        export_dxf_action.triggered.connect(lambda: self.menu_action_triggered.emit("export_dxf"))
+        
         file_menu.addSeparator()
         
         exit_action = file_menu.addAction("Exit")
